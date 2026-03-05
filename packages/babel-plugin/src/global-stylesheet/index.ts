@@ -1,78 +1,13 @@
 import type { NodePath } from '@babel/core';
 import * as t from '@babel/types';
-import { hash, kebabCase } from '@compiled/utils';
+import { hash } from '@compiled/utils';
 
+import { visitCssFragmentPath } from '../css-fragment';
 import type { Metadata } from '../types';
 import { buildCodeFrameError } from '../utils/ast';
-import { deepMergeStyles } from '../utils/deep-merge-styles';
+import { buildCss, getItemCss } from '../utils/css-builders';
 
 const VANILLA_RUNTIME_MODULE = '@compiled/vanilla/runtime';
-
-/**
- * Converts a plain JS object (from static evaluation) to a non-atomic CSS string
- * scoped under the given class name.
- *
- * The top-level keys of the style object are treated as sub-selectors.
- * E.g. { '.pm-table-cell': { padding: '8px' } } →
- *   .gs_abc1234 .pm-table-cell{padding:8px}
- */
-const serializeStyles = (scopingClass: string, styleObj: Record<string, unknown>): string => {
-  const parts: string[] = [];
-
-  for (const [selector, declarations] of Object.entries(styleObj)) {
-    if (typeof declarations !== 'object' || declarations === null) {
-      continue;
-    }
-
-    const decls = Object.entries(declarations as Record<string, unknown>)
-      .map(([prop, value]) => `${kebabCase(prop)}:${value}`)
-      .join(';');
-
-    parts.push(`.${scopingClass} ${selector}{${decls}}`);
-  }
-
-  return parts.join('');
-};
-
-/**
- * Statically evaluates an ObjectExpression node into a plain JS object.
- * Only supports string/number literals as values (nested objects allowed).
- * Returns null if any value cannot be statically determined.
- */
-const evaluateObjectExpression = (node: t.ObjectExpression): Record<string, unknown> | null => {
-  const result: Record<string, unknown> = {};
-
-  for (const prop of node.properties) {
-    if (!t.isObjectProperty(prop)) {
-      return null;
-    }
-
-    // Get key name
-    let keyName: string;
-    if (t.isIdentifier(prop.key)) {
-      keyName = prop.key.name;
-    } else if (t.isStringLiteral(prop.key)) {
-      keyName = prop.key.value;
-    } else {
-      return null;
-    }
-
-    // Get value
-    if (t.isObjectExpression(prop.value)) {
-      const nested = evaluateObjectExpression(prop.value);
-      if (nested === null) return null;
-      result[keyName] = nested;
-    } else if (t.isStringLiteral(prop.value)) {
-      result[keyName] = prop.value.value;
-    } else if (t.isNumericLiteral(prop.value)) {
-      result[keyName] = prop.value.value;
-    } else {
-      return null;
-    }
-  }
-
-  return result;
-};
 
 /**
  * Adds `injectGlobalStyles` import from `@compiled/vanilla/runtime` to the program,
@@ -90,7 +25,6 @@ const ensureInjectGlobalStylesImport = (
   );
 
   if (existing) {
-    // Check if injectGlobalStyles is already a specifier
     const hasIt = existing.node.specifiers.some(
       (s) => t.isImportSpecifier(s) && t.isIdentifier(s.local) && s.local.name === localName
     );
@@ -112,9 +46,58 @@ const ensureInjectGlobalStylesImport = (
 };
 
 /**
+ * Walks an expression and pre-visits any identifier bindings whose init is still
+ * an un-transformed cssFragment() CallExpression, transforming them in-place before
+ * buildCss runs. This handles the case where cssFragment is defined after the
+ * globalStylesheet call in source order (or cross-file).
+ */
+const preResolveCssFragments = (expr: t.Expression, meta: Metadata): void => {
+  const collectIdentifiers = (node: t.Node): string[] => {
+    if (t.isIdentifier(node)) return [node.name];
+    if (t.isArrayExpression(node)) {
+      return (node.elements ?? []).flatMap((el) => (el ? collectIdentifiers(el) : []));
+    }
+    if (t.isObjectExpression(node)) {
+      return node.properties.flatMap((p) =>
+        t.isObjectProperty(p) ? collectIdentifiers(p.value) : []
+      );
+    }
+    return [];
+  };
+
+  for (const name of collectIdentifiers(expr)) {
+    const binding = meta.parentPath.scope.getBinding(name);
+    if (!binding || !t.isVariableDeclarator(binding.path.node)) continue;
+    const init = binding.path.node.init;
+    if (!init || !t.isCallExpression(init)) continue;
+
+    // Check if this is an un-transformed cssFragment() call
+    const callee = init.callee;
+    const isCssFragment =
+      t.isIdentifier(callee) && meta.state.compiledImports?.cssFragment?.includes(callee.name);
+    if (!isCssFragment) continue;
+
+    // Get the NodePath for the cssFragment CallExpression and visit it
+    const initPath = binding.path.get('init');
+    const initPathResolved = Array.isArray(initPath) ? initPath[0] : initPath;
+    if (initPathResolved && t.isCallExpression(initPathResolved.node)) {
+      visitCssFragmentPath(initPathResolved as NodePath<t.CallExpression>, {
+        context: 'root',
+        state: meta.state,
+        parentPath: binding.path,
+      });
+    }
+  }
+};
+
+/**
  * Transforms a `globalStylesheet()` call expression into:
  * 1. An object literal mapping key names to scoping class names.
  * 2. A series of `injectGlobalStyles(css, className)` calls inserted after the declaration.
+ *
+ * Uses the existing buildCss() pipeline so that token(), cssFragment references,
+ * identifiers, and all other expression types are resolved correctly — exactly
+ * the same way as cssMap and css() handle them.
  */
 export const visitGlobalStylesheetPath = (
   path: NodePath<t.CallExpression> | NodePath<t.TaggedTemplateExpression>,
@@ -140,8 +123,6 @@ export const visitGlobalStylesheetPath = (
     );
   }
 
-  // Check that we're actually at module scope:
-  // VariableDeclarator → VariableDeclaration → (ExportNamedDeclaration →)? Program
   const varDeclaratorPath = path.parentPath;
   const varDeclarationPath = varDeclaratorPath?.parentPath;
   if (!varDeclarationPath) {
@@ -186,11 +167,8 @@ export const visitGlobalStylesheetPath = (
 
   const filename = meta.state.filename ?? 'unknown';
 
-  // Collect the inject calls we'll insert after the declaration
   const injectCalls: t.ExpressionStatement[] = [];
   const injectGlobalStylesLocalName = 'injectGlobalStyles';
-
-  // Build the replacement object { keyName: 'gs_<hash>', ... }
   const replacementProperties: t.ObjectProperty[] = [];
 
   for (const property of arg.properties) {
@@ -219,80 +197,73 @@ export const visitGlobalStylesheetPath = (
     // Generate scoping class name: gs_ + first 7 chars of hash(filename + keyName)
     const scopingClass = `gs_${hash(filename + keyName).slice(0, 7)}`;
 
-    // Statically evaluate the property value — supports plain object or array composition
-    let styleObj: Record<string, unknown> | null = null;
+    // Pre-resolve any cssFragment() bindings referenced in this property value
+    // that haven't been visited yet (e.g. defined after this globalStylesheet call in source).
+    // buildCss resolves identifier bindings, but if the init is still a cssFragment()
+    // CallExpression it can't handle it — so we visit those fragments first.
+    preResolveCssFragments(property.value as t.Expression, meta);
 
-    if (t.isObjectExpression(property.value)) {
-      styleObj = evaluateObjectExpression(property.value);
-    } else if (t.isArrayExpression(property.value)) {
-      // Array composition: [fragmentRef, { overrides }]
-      // Each element must resolve to a plain object (already evaluated cssFragment or inline object)
-      const parts: Record<string, unknown>[] = [];
-      for (const element of property.value.elements) {
-        if (element === null || t.isSpreadElement(element)) {
-          throw buildCodeFrameError(
-            'globalStylesheet() values must be statically evaluable',
-            callNode,
-            meta.parentPath
-          );
-        }
-        if (t.isObjectExpression(element)) {
-          const obj = evaluateObjectExpression(element);
-          if (obj === null) {
-            throw buildCodeFrameError(
-              'globalStylesheet() values must be statically evaluable',
-              callNode,
-              meta.parentPath
-            );
-          }
-          parts.push(obj);
-        } else if (t.isIdentifier(element)) {
-          // Resolve the binding — should be a cssFragment (already replaced with plain object)
-          const binding = meta.parentPath.scope.getBinding(element.name);
-          if (!binding || !t.isVariableDeclarator(binding.path.node)) {
-            throw buildCodeFrameError(
-              'globalStylesheet() values must be statically evaluable',
-              callNode,
-              meta.parentPath
-            );
-          }
-          const init = binding.path.node.init;
-          if (!init || !t.isObjectExpression(init)) {
-            throw buildCodeFrameError(
-              'globalStylesheet() values must be statically evaluable',
-              callNode,
-              meta.parentPath
-            );
-          }
-          const obj = evaluateObjectExpression(init);
-          if (obj === null) {
-            throw buildCodeFrameError(
-              'globalStylesheet() values must be statically evaluable',
-              callNode,
-              meta.parentPath
-            );
-          }
-          parts.push(obj);
-        } else {
-          throw buildCodeFrameError(
-            'globalStylesheet() values must be statically evaluable',
-            callNode,
-            meta.parentPath
-          );
-        }
-      }
-      styleObj = deepMergeStyles(parts);
-    }
-
-    if (styleObj === null) {
+    // Use buildCss() to evaluate the property value — this handles token(), cssFragment
+    // references (via identifier resolution), arrays, nested objects, and all other
+    // expression types exactly the same way as cssMap and css() do.
+    //
+    // The property value is expected to be an object where:
+    // - top-level keys are CSS selectors (e.g. '.pm-table-cell')
+    // - values are style objects (or arrays of style objects for composition)
+    //
+    // We call buildCss on the whole object, which gives us CssItems.
+    // Each CssItem's css string is a declaration like `color: red;` already wrapped
+    // in a selector rule by the toCSSRule path inside buildCss when it encounters
+    // nested objects (since nested objects in the input become CSS rules).
+    //
+    // To get non-atomic output: we collect all unconditional CSS strings from the items
+    // and join them. Dynamic values (variables) are NOT supported in globalStylesheet
+    // (it must be fully static), so we throw if any CSS variables are produced.
+    let cssOutput;
+    try {
+      cssOutput = buildCss(property.value as t.Expression, meta);
+    } catch (e: any) {
       throw buildCodeFrameError(
-        'globalStylesheet() values must be statically evaluable',
+        `globalStylesheet() values must be statically evaluable: ${e.message}`,
         callNode,
         meta.parentPath
       );
     }
 
-    const cssString = serializeStyles(scopingClass, styleObj);
+    if (cssOutput.variables.length > 0) {
+      throw buildCodeFrameError(
+        'globalStylesheet() values must be statically evaluable — dynamic values (CSS variables) are not supported',
+        callNode,
+        meta.parentPath
+      );
+    }
+
+    // Collect CSS strings from all unconditional items.
+    // buildCss on a nested object like { '.pm-table-cell': { padding: '8px' } } produces
+    // items with css like `.pm-table-cell { padding: 8px; }` (via toCSSRule).
+    // We then prepend the scoping class to each rule.
+    const cssLines: string[] = [];
+    for (const item of cssOutput.css) {
+      if (item.type === 'unconditional' || item.type === 'sheet') {
+        const raw = getItemCss(item).trim();
+        if (!raw) continue;
+        // The raw CSS from buildCss for nested objects looks like:
+        // `.pm-table-cell { padding: 8px; }`
+        // We need to prepend the scoping class: `.gs_xxx .pm-table-cell { ... }`
+        // But buildCss wraps in the selector as-is; we need to insert the scoping class.
+        // Prepend `.${scopingClass} ` before the selector in each rule.
+        const scoped = prependScopingClass(raw, scopingClass);
+        if (scoped) cssLines.push(scoped);
+      } else if (item.type === 'logical' || item.type === 'conditional') {
+        throw buildCodeFrameError(
+          'globalStylesheet() values must be statically evaluable — conditional expressions are not supported',
+          callNode,
+          meta.parentPath
+        );
+      }
+    }
+
+    const cssString = cssLines.join('');
 
     replacementProperties.push(
       t.objectProperty(t.identifier(keyName), t.stringLiteral(scopingClass))
@@ -311,13 +282,11 @@ export const visitGlobalStylesheetPath = (
   // Replace the call expression with the object literal
   path.replaceWith(t.objectExpression(replacementProperties));
 
-  // Insert inject calls after the statement (VariableDeclaration or ExportNamedDeclaration)
-  // The insertion point is the outermost statement at module scope
+  // Insert inject calls after the statement
   const insertionPath = t.isExportNamedDeclaration(varDeclParent)
     ? varDeclarationPath.parentPath!
     : varDeclarationPath;
 
-  // Insert in reverse order so they appear in original order after the declaration
   for (let i = injectCalls.length - 1; i >= 0; i--) {
     insertionPath.insertAfter(injectCalls[i]);
   }
@@ -330,4 +299,39 @@ export const visitGlobalStylesheetPath = (
   if (programPath) {
     ensureInjectGlobalStylesImport(programPath, injectGlobalStylesLocalName);
   }
+};
+
+/**
+ * Minifies a CSS string by removing unnecessary whitespace.
+ * Produces compact output like `color:red;font-size:12px` suitable for injectGlobalStyles.
+ */
+const minifyCss = (css: string): string =>
+  css
+    .replace(/\s*{\s*/g, '{')
+    .replace(/\s*}\s*/g, '}')
+    .replace(/\s*:\s*/g, ':')
+    .replace(/\s*;\s*/g, ';')
+    .replace(/;\s*}/g, '}')
+    .trim();
+
+/**
+ * Prepends the scoping class to each CSS rule in a raw CSS string.
+ *
+ * buildCss produces strings like `.pm-table-cell { padding: 8px; }` for nested
+ * selector objects. We need `.gs_abc1234 .pm-table-cell { padding: 8px; }`.
+ *
+ * For plain declarations without a selector (shouldn't happen in globalStylesheet
+ * but handled defensively), we wrap them in the scoping class directly.
+ */
+const prependScopingClass = (raw: string, scopingClass: string): string => {
+  const trimmed = minifyCss(raw);
+  if (!trimmed) return '';
+
+  // If it already looks like a rule (contains `{`), prepend the scoping class before the selector.
+  if (trimmed.includes('{')) {
+    return `.${scopingClass} ${trimmed}`;
+  }
+
+  // Plain declaration — wrap in scoping class rule
+  return `.${scopingClass}{${trimmed}}`;
 };

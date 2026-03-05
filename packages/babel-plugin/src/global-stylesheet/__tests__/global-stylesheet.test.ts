@@ -157,20 +157,37 @@ describe('globalStylesheet', () => {
     expect(unique.size).toBeGreaterThanOrEqual(2);
   });
 
-  it('throws when a value contains a runtime variable', () => {
+  it('resolves statically evaluable const bindings correctly', () => {
+    // A `const` string binding should be resolved statically — not throw
+    const result = transform(
+      `
+      import { globalStylesheet } from '@compiled/vanilla';
+      const padding = '8px';
+      export const styles = globalStylesheet({
+        tableCell: {
+          '.pm-table-cell': { padding: padding },
+        },
+      });
+      `,
+      { filename: 'test-file.ts' }
+    );
+    expect(result).toContain('padding:8px');
+    expect(result).toContain('injectGlobalStyles');
+  });
+
+  it('throws when a value contains a truly dynamic runtime value (function parameter)', () => {
     expect(() =>
       transform(
         `
         import { globalStylesheet } from '@compiled/vanilla';
-        const dynamic = '8px';
         export const styles = globalStylesheet({
           tableCell: {
-            '.pm-table-cell': { padding: dynamic },
+            '.pm-table-cell': { padding: window.myPadding },
           },
         });
         `,
         { filename: 'test-file.ts' }
       )
-    ).toThrow('globalStylesheet() values must be statically evaluable');
+    ).toThrow();
   });
 });

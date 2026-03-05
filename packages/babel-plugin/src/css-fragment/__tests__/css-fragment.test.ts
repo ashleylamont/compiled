@@ -65,7 +65,10 @@ describe('cssFragment', () => {
       export const styles = {
         cell: "gs_18oglda",
       };
-      injectGlobalStyles(".gs_18oglda .child{color:red;font-size:14}", "gs_18oglda");
+      injectGlobalStyles(
+        ".gs_18oglda .child{color:red}.gs_18oglda .child{font-size:14px}",
+        "gs_18oglda"
+      );
       "
     `);
   });
@@ -83,6 +86,27 @@ describe('cssFragment', () => {
         { filename: 'test-file.ts' }
       )
     ).toThrow('cssFragment() must be assigned to a module-level variable');
+  });
+
+  it('globalStylesheet can consume cssFragment even when binding init is still a CallExpression (pre-transform order)', () => {
+    // Simulate the case where the binding's init is still a cssFragment() CallExpression
+    // (e.g. cross-file import scenario where the other file hasn't been transformed yet).
+    // We replicate this by putting globalStylesheet BEFORE cssFragment in source order —
+    // Babel visits in source order so globalStylesheet will run first, encountering
+    // an unresolved cssFragment() call expression as the binding init.
+    const result = transform(
+      `
+      import { cssFragment, globalStylesheet } from '@compiled/vanilla';
+      export const styles = globalStylesheet({
+        cell: [dangerHighlight, { '.child': { backgroundColor: 'red' } }],
+      });
+      const dangerHighlight = cssFragment({ '.child': { color: 'orange' } });
+      `,
+      { filename: 'test-file.ts' }
+    );
+    expect(result).toContain('injectGlobalStyles');
+    expect(result).toContain('color:orange');
+    expect(result).toContain('background-color:red');
   });
 
   it('throws when cssFragment contains a runtime variable', () => {
