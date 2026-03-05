@@ -1,0 +1,38 @@
+{
+  "name": "@compiled/runtime",
+  "version": "0.1.0",
+  "description": "React-free runtime utilities for Compiled CSS-in-JS.",
+  "homepage": "https://compiledcssinjs.com",
+  "bugs": "https://github.com/atlassian-labs/compiled/issues/new?assignees=&labels=bug&template=bug_report.md",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/atlassian-labs/compiled.git",
+    "directory": "packages/runtime"
+  },
+  "license": "Apache-2.0",
+  "author": "Michael Dougall",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "import": [
+        "./dist/esm/index.js",
+        "./src/index.ts"
+      ],
+      "require": [
+        "./dist/cjs/index.js",
+        "./src/index.ts"
+      ]
+    }
+  },
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "browser": "./dist/browser/index.js",
+  "types": "./dist/esm/index.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "dependencies": {
+    "@compiled/utils": "*"
+  }
+}

@@ -19,33 +19,33 @@
 
 **Purpose**: Create `@compiled/runtime` shared package, `@compiled/vanilla` package skeleton, runtime stubs, and register the import source
 
-- [ ] T001 Create @compiled/runtime package directory and package.json (no React peer dependency) at packages/runtime/package.json
-- [ ] T002 [P] Create tsconfig.json at packages/runtime/ (mirror packages/utils/ conventions — CJS + ESM outputs)
-- [ ] T003 [P] Move ax.ts from packages/react/src/runtime/ax.ts to packages/runtime/src/ax.ts
-- [ ] T004 [P] Move ac.ts from packages/react/src/runtime/ac.ts to packages/runtime/src/ac.ts
-- [ ] T005 [P] Move is-server-environment.ts from packages/react/src/runtime/ to packages/runtime/src/
-- [ ] T006 [P] Move cache.ts from packages/react/src/runtime/ to packages/runtime/src/
-- [ ] T007 [P] Move shorthand.ts from packages/react/src/runtime/ to packages/runtime/src/
-- [ ] T008 [P] Move sheet.ts from packages/react/src/runtime/ to packages/runtime/src/
-- [ ] T009 [P] Move css-custom-property.ts from packages/react/src/runtime/ to packages/runtime/src/
-- [ ] T010 [P] Create types.ts at packages/runtime/src/types.ts with React-free types (Bucket, StyleSheetOpts, Depths)
-- [ ] T011 Create barrel export at packages/runtime/src/index.ts (export all utilities)
-- [ ] T012 Update @compiled/react to re-export runtime utilities from @compiled/runtime — update packages/react/src/runtime/index.ts to re-export ax, ac, sheet, etc. from @compiled/runtime so existing consumers are unaffected
-- [ ] T013 Add @compiled/runtime as dependency in packages/react/package.json
-- [ ] T014 Verify @compiled/react tests still pass after runtime extraction — run yarn workspace @compiled/react test
-- [ ] T015 Create @compiled/vanilla package directory and package.json (no React peer dep, depends on @compiled/runtime) at packages/vanilla/package.json
-- [ ] T016 Create tsconfig.json, tsconfig.browser.json, tsconfig.cjs.json at packages/vanilla/ (mirror packages/react/ conventions)
-- [ ] T017 Create CJS entry point at packages/vanilla/index.js
-- [ ] T018 [P] Create shared type definitions at packages/vanilla/src/types.ts (CSSProperties, CSSMapInput, GlobalStylesheetInput, CSSFragmentInput)
-- [ ] T019 [P] Create runtime stubs — all four API stubs created upfront so barrel export works:
+- [x] T001 Create @compiled/runtime package directory and package.json (no React peer dependency) at packages/runtime/package.json
+- [x] T002 [P] Create tsconfig.json at packages/runtime/ (mirror packages/utils/ conventions — CJS + ESM outputs)
+- [x] T003 [P] Move ax.ts from packages/react/src/runtime/ax.ts to packages/runtime/src/ax.ts
+- [x] T004 [P] Move ac.ts from packages/react/src/runtime/ac.ts to packages/runtime/src/ac.ts
+- [x] T005 [P] Move is-server-environment.ts from packages/react/src/runtime/ to packages/runtime/src/
+- [x] T006 [P] Move cache.ts from packages/react/src/runtime/ to packages/runtime/src/
+- [x] T007 [P] Move shorthand.ts from packages/react/src/runtime/ to packages/runtime/src/
+- [x] T008 [P] Move sheet.ts from packages/react/src/runtime/ to packages/runtime/src/
+- [x] T009 [P] Move css-custom-property.ts from packages/react/src/runtime/ to packages/runtime/src/
+- [x] T010 [P] Create types.ts at packages/runtime/src/types.ts with React-free types (Bucket, StyleSheetOpts, Depths)
+- [x] T011 Create barrel export at packages/runtime/src/index.ts (export all utilities)
+- [x] T012 Update @compiled/react to re-export runtime utilities from @compiled/runtime — update packages/react/src/runtime/index.ts to re-export ax, ac, sheet, etc. from @compiled/runtime so existing consumers are unaffected
+- [x] T013 Add @compiled/runtime as dependency in packages/react/package.json
+- [x] T014 Verify @compiled/react tests still pass after runtime extraction — run yarn workspace @compiled/react test
+- [x] T015 Create @compiled/vanilla package directory and package.json (no React peer dep, depends on @compiled/runtime) at packages/vanilla/package.json
+- [x] T016 Create tsconfig.json, tsconfig.browser.json, tsconfig.cjs.json at packages/vanilla/ (mirror packages/react/ conventions)
+- [x] T017 Create CJS entry point at packages/vanilla/index.js
+- [x] T018 [P] Create shared type definitions at packages/vanilla/src/types.ts (CSSProperties, CSSMapInput, GlobalStylesheetInput, CSSFragmentInput)
+- [x] T019 [P] Create runtime stubs — all four API stubs created upfront so barrel export works:
   - packages/vanilla/src/css-map.ts (typed function that throws if not compiled away)
   - packages/vanilla/src/class-names.ts (typed function that throws if not compiled away)
   - packages/vanilla/src/global-stylesheet.ts (typed function that throws if not compiled away)
   - packages/vanilla/src/css-fragment.ts (typed function that throws if not compiled away)
-- [ ] T020 [P] Create public API barrel export at packages/vanilla/src/index.ts (export cssMap, classNames, globalStylesheet, cssFragment)
-- [ ] T021 [P] Create vanilla runtime barrel at packages/vanilla/src/runtime/index.ts (re-export ax from @compiled/runtime)
-- [ ] T022 Add @compiled/vanilla to DEFAULT_IMPORT_SOURCES in packages/utils/src/constants.ts
-- [ ] T023 Add @compiled/runtime and @compiled/vanilla workspaces to root package.json workspaces array
+- [x] T020 [P] Create public API barrel export at packages/vanilla/src/index.ts (export cssMap, classNames, globalStylesheet, cssFragment)
+- [x] T021 [P] Create vanilla runtime barrel at packages/vanilla/src/runtime/index.ts (re-export ax from @compiled/runtime)
+- [x] T022 Add @compiled/vanilla to DEFAULT_IMPORT_SOURCES in packages/utils/src/constants.ts
+- [x] T023 Add @compiled/runtime and @compiled/vanilla workspaces to root package.json workspaces array
 - [ ] T024 Verify `yarn install` and `yarn build` succeed with both new packages
 
 ---
@@ -56,10 +56,10 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T025 Register `classNames`, `globalStylesheet`, and `cssFragment` as recognised API names in the ImportDeclaration visitor at packages/babel-plugin/src/babel-plugin.ts (add to the compiledImports tracking alongside existing cssMap, styled, css, keyframes). Note: `cssMap` detection already works via DEFAULT_IMPORT_SOURCES — this task only registers the new API names.
-- [ ] T026 Write test verifying that imports from `@compiled/vanilla` are detected by the Babel plugin at packages/babel-plugin/src/**tests**/index.test.ts
-- [ ] T027 [P] Create deep-merge-styles utility at packages/babel-plugin/src/utils/deep-merge-styles.ts — recursive merge with last-in-array wins for flat properties, recursive combine for nested selectors
-- [ ] T028 [P] Write tests for deep-merge-styles at packages/babel-plugin/src/utils/**tests**/deep-merge-styles.test.ts — cover: flat property override, nested selector merge, overlapping ::before/::after, mixed fragments + inline objects, empty arrays
+- [x] T025 Register `classNames`, `globalStylesheet`, and `cssFragment` as recognised API names in the ImportDeclaration visitor at packages/babel-plugin/src/babel-plugin.ts (add to the compiledImports tracking alongside existing cssMap, styled, css, keyframes). Note: `cssMap` detection already works via DEFAULT_IMPORT_SOURCES — this task only registers the new API names.
+- [x] T026 Write test verifying that imports from `@compiled/vanilla` are detected by the Babel plugin at packages/babel-plugin/src/**tests**/index.test.ts
+- [x] T027 [P] Create deep-merge-styles utility at packages/babel-plugin/src/utils/deep-merge-styles.ts — recursive merge with last-in-array wins for flat properties, recursive combine for nested selectors
+- [x] T028 [P] Write tests for deep-merge-styles at packages/babel-plugin/src/utils/**tests**/deep-merge-styles.test.ts — cover: flat property override, nested selector merge, overlapping ::before/::after, mixed fragments + inline objects, empty arrays
 
 **Checkpoint**: Foundation ready — Babel plugin recognises @compiled/vanilla imports and deep-merge utility is available
 
@@ -75,18 +75,18 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T029 [P] [US1] Write snapshot test: cssMap from @compiled/vanilla produces atomic CSS at packages/babel-plugin/src/css-map/**tests**/css-map-vanilla.test.ts
-- [ ] T030 [P] [US1] Write snapshot test: classNames([styles.base, cond && styles.done]) is replaced with ax() call (from @compiled/runtime) at packages/babel-plugin/src/class-names/**tests**/class-names.test.ts
-- [ ] T031 [P] [US1] Write snapshot test: cssMap with token() calls resolves to var(--ds-...) at packages/babel-plugin/src/css-map/**tests**/css-map-vanilla.test.ts
-- [ ] T032 [P] [US1] Write snapshot test: classNames with single variant resolves correctly at packages/babel-plugin/src/class-names/**tests**/class-names.test.ts
-- [ ] T033 [P] [US1] Write test: cssMap deduplication — identical declarations across modules produce same class name at packages/babel-plugin/src/css-map/**tests**/css-map-vanilla.test.ts
+- [x] T029 [P] [US1] Write snapshot test: cssMap from @compiled/vanilla produces atomic CSS at packages/babel-plugin/src/css-map/**tests**/css-map-vanilla.test.ts
+- [x] T030 [P] [US1] Write snapshot test: classNames([styles.base, cond && styles.done]) is replaced with ax() call (from @compiled/runtime) at packages/babel-plugin/src/class-names/**tests**/class-names.test.ts
+- [x] T031 [P] [US1] Write snapshot test: cssMap with token() calls resolves to var(--ds-...) at packages/babel-plugin/src/css-map/**tests**/css-map-vanilla.test.ts
+- [x] T032 [P] [US1] Write snapshot test: classNames with single variant resolves correctly at packages/babel-plugin/src/class-names/**tests**/class-names.test.ts
+- [x] T033 [P] [US1] Write test: cssMap deduplication — identical declarations across modules produce same class name at packages/babel-plugin/src/css-map/**tests**/css-map-vanilla.test.ts
 
 ### Implementation for User Story 1
 
-- [ ] T034 [US1] Create classNames Babel handler at packages/babel-plugin/src/class-names/index.ts — detect classNames() calls, extract CSS for all referenced cssMap variants, replace with ax() import from @compiled/runtime
-- [ ] T035 [US1] Route classNames CallExpression to visitClassNamesPath in packages/babel-plugin/src/babel-plugin.ts
-- [ ] T036 [US1] Verify all US1 snapshot tests pass — update snapshots after confirming output is correct
-- [ ] T037 [US1] Write integration test: toDOM-style usage pattern at packages/vanilla/src/**tests**/css-map.test.ts — cssMap + classNames in a non-React file
+- [x] T034 [US1] Create classNames Babel handler at packages/babel-plugin/src/class-names/index.ts — detect classNames() calls, extract CSS for all referenced cssMap variants, replace with ax() import from @compiled/runtime
+- [x] T035 [US1] Route classNames CallExpression to visitClassNamesPath in packages/babel-plugin/src/babel-plugin.ts
+- [x] T036 [US1] Verify all US1 snapshot tests pass — update snapshots after confirming output is correct
+- [x] T037 [US1] Write integration test: toDOM-style usage pattern at packages/vanilla/src/**tests**/css-map.test.ts — cssMap + classNames in a non-React file
 
 **Checkpoint**: cssMap + classNames work from @compiled/vanilla. Atomic CSS extracted, classNames → ax() at runtime. No React required.
 
@@ -102,24 +102,24 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T038 [P] [US2] Write snapshot test: globalStylesheet produces class name map and CSS string at packages/babel-plugin/src/global-stylesheet/**tests**/global-stylesheet.test.ts
-- [ ] T039 [P] [US2] Write snapshot test: globalStylesheet with multiple keys produces distinct hashed class names at packages/babel-plugin/src/global-stylesheet/**tests**/global-stylesheet.test.ts
-- [ ] T040 [P] [US2] Write snapshot test: globalStylesheet with nested selectors, pseudo-elements, token() at packages/babel-plugin/src/global-stylesheet/**tests**/global-stylesheet.test.ts
-- [ ] T041 [P] [US2] Write error test: globalStylesheet inside function body emits compile-time error at packages/babel-plugin/src/global-stylesheet/**tests**/global-stylesheet.test.ts
-- [ ] T042 [P] [US2] Write error test: globalStylesheet with runtime variable emits compile-time error at packages/babel-plugin/src/global-stylesheet/**tests**/global-stylesheet.test.ts
-- [ ] T043 [P] [US2] Write test: dev-mode injectGlobalStyles() call is emitted in transformed output at packages/babel-plugin/src/global-stylesheet/**tests**/global-stylesheet.test.ts
+- [x] T038 [P] [US2] Write snapshot test: globalStylesheet produces class name map and CSS string at packages/babel-plugin/src/global-stylesheet/**tests**/global-stylesheet.test.ts
+- [x] T039 [P] [US2] Write snapshot test: globalStylesheet with multiple keys produces distinct hashed class names at packages/babel-plugin/src/global-stylesheet/**tests**/global-stylesheet.test.ts
+- [x] T040 [P] [US2] Write snapshot test: globalStylesheet with nested selectors, pseudo-elements, token() at packages/babel-plugin/src/global-stylesheet/**tests**/global-stylesheet.test.ts
+- [x] T041 [P] [US2] Write error test: globalStylesheet inside function body emits compile-time error at packages/babel-plugin/src/global-stylesheet/**tests**/global-stylesheet.test.ts
+- [x] T042 [P] [US2] Write error test: globalStylesheet with runtime variable emits compile-time error at packages/babel-plugin/src/global-stylesheet/**tests**/global-stylesheet.test.ts
+- [x] T043 [P] [US2] Write test: dev-mode injectGlobalStyles() call is emitted in transformed output at packages/babel-plugin/src/global-stylesheet/**tests**/global-stylesheet.test.ts
 
 ### Implementation for User Story 2
 
-- [ ] T044 [US2] Create injectGlobalStyles runtime utility at packages/vanilla/src/runtime/inject-global.ts — plain DOM <style> injection, SSR-safe no-op
-- [ ] T045 [US2] Export injectGlobalStyles from packages/vanilla/src/runtime/index.ts
-- [ ] T046 [US2] Create globalStylesheet Babel handler at packages/babel-plugin/src/global-stylesheet/index.ts — statically evaluate style object, generate gs\_<hash> class names per key, serialise CSS with scoping selector, emit injectGlobalStyles() call + map literal
-- [ ] T047 [US2] Route globalStylesheet CallExpression to visitGlobalStylesheetPath in packages/babel-plugin/src/babel-plugin.ts
-- [ ] T048 [US2] Add module-level declaration check in globalStylesheet handler — emit error if call is inside function/conditional/loop
-- [ ] T049 [US2] Add static evaluability check in globalStylesheet handler — emit error for runtime variables
-- [ ] T050 [US2] Verify all US2 snapshot tests pass — update snapshots after confirming output is correct
-- [ ] T051 [US2] Extend babel-plugin-strip-runtime to handle injectGlobalStyles() calls at packages/babel-plugin-strip-runtime/src/index.ts — collect CSS, write to .global.css, replace call with import
-- [ ] T052 [US2] Write test for strip-runtime .global.css extraction at packages/babel-plugin-strip-runtime/src/**tests**/extract-styles.test.ts
+- [x] T044 [US2] Create injectGlobalStyles runtime utility at packages/vanilla/src/runtime/inject-global.ts — plain DOM <style> injection, SSR-safe no-op
+- [x] T045 [US2] Export injectGlobalStyles from packages/vanilla/src/runtime/index.ts
+- [x] T046 [US2] Create globalStylesheet Babel handler at packages/babel-plugin/src/global-stylesheet/index.ts — statically evaluate style object, generate gs\_<hash> class names per key, serialise CSS with scoping selector, emit injectGlobalStyles() call + map literal
+- [x] T047 [US2] Route globalStylesheet CallExpression to visitGlobalStylesheetPath in packages/babel-plugin/src/babel-plugin.ts
+- [x] T048 [US2] Add module-level declaration check in globalStylesheet handler — emit error if call is inside function/conditional/loop
+- [x] T049 [US2] Add static evaluability check in globalStylesheet handler — emit error for runtime variables
+- [x] T050 [US2] Verify all US2 snapshot tests pass — update snapshots after confirming output is correct
+- [x] T051 [US2] Extend babel-plugin-strip-runtime to handle injectGlobalStyles() calls at packages/babel-plugin-strip-runtime/src/index.ts — collect CSS, write to .global.css, replace call with import
+- [x] T052 [US2] Write test for strip-runtime .global.css extraction at packages/babel-plugin-strip-runtime/src/**tests**/extract-styles.test.ts
 
 **Checkpoint**: globalStylesheet produces scoped non-atomic CSS. Dev-mode injection works. Strip-runtime extracts to .global.css.
 
@@ -133,13 +133,13 @@
 
 ### Tests for User Story 5 ⚠️
 
-- [ ] T053 [P] [US5] Write test: packages/vanilla/package.json and packages/runtime/package.json have no React in peerDependencies or dependencies at packages/vanilla/src/**tests**/integration.test.ts
-- [ ] T054 [P] [US5] Write test: all source files in packages/vanilla/src/ and packages/runtime/src/ have zero React imports — grep-based validation at packages/vanilla/src/**tests**/integration.test.ts
+- [x] T053 [P] [US5] Write test: packages/vanilla/package.json and packages/runtime/package.json have no React in peerDependencies or dependencies at packages/vanilla/src/**tests**/integration.test.ts
+- [x] T054 [P] [US5] Write test: all source files in packages/vanilla/src/ and packages/runtime/src/ have zero React imports — grep-based validation at packages/vanilla/src/**tests**/integration.test.ts
 
 ### Implementation for User Story 5
 
-- [ ] T055 [US5] Verify `yarn build` succeeds for @compiled/runtime and @compiled/vanilla without React types installed
-- [ ] T056 [US5] Verify TypeScript compilation of a consumer file importing from @compiled/vanilla succeeds without @types/react
+- [x] T055 [US5] Verify `yarn build` succeeds for @compiled/runtime and @compiled/vanilla without React types installed
+- [x] T056 [US5] Verify TypeScript compilation of a consumer file importing from @compiled/vanilla succeeds without @types/react
 
 **Checkpoint**: Zero-React contract verified. Both packages install, build, and type-check without React.
 
@@ -155,21 +155,21 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T057 [P] [US3] Write snapshot test: cssFragment composed via array in globalStylesheet produces merged CSS at packages/babel-plugin/src/css-fragment/**tests**/css-fragment.test.ts
-- [ ] T058 [P] [US3] Write snapshot test: two cssFragments with overlapping ::before deep-merge correctly at packages/babel-plugin/src/css-fragment/**tests**/css-fragment.test.ts
-- [ ] T059 [P] [US3] Write snapshot test: cssFragment imported cross-file resolves and inlines at packages/babel-plugin/src/css-fragment/**tests**/css-fragment.test.ts
-- [ ] T060 [P] [US3] Write test: standalone cssFragment produces no CSS output at packages/babel-plugin/src/css-fragment/**tests**/css-fragment.test.ts
-- [ ] T061 [P] [US3] Write error test: cssFragment with runtime variable emits compile-time error at packages/babel-plugin/src/css-fragment/**tests**/css-fragment.test.ts
-- [ ] T062 [P] [US3] Write error test: circular cssFragment reference emits compile-time error at packages/babel-plugin/src/css-fragment/**tests**/css-fragment.test.ts
+- [x] T057 [P] [US3] Write snapshot test: cssFragment composed via array in globalStylesheet produces merged CSS at packages/babel-plugin/src/css-fragment/**tests**/css-fragment.test.ts
+- [x] T058 [P] [US3] Write snapshot test: two cssFragments with overlapping ::before deep-merge correctly at packages/babel-plugin/src/css-fragment/**tests**/css-fragment.test.ts
+- [x] T059 [P] [US3] Write snapshot test: cssFragment imported cross-file resolves and inlines at packages/babel-plugin/src/css-fragment/**tests**/css-fragment.test.ts
+- [x] T060 [P] [US3] Write test: standalone cssFragment produces no CSS output at packages/babel-plugin/src/css-fragment/**tests**/css-fragment.test.ts
+- [x] T061 [P] [US3] Write error test: cssFragment with runtime variable emits compile-time error at packages/babel-plugin/src/css-fragment/**tests**/css-fragment.test.ts
+- [x] T062 [P] [US3] Write error test: circular cssFragment reference emits compile-time error at packages/babel-plugin/src/css-fragment/**tests**/css-fragment.test.ts
 
 ### Implementation for User Story 3
 
-- [ ] T063 [US3] Create cssFragment Babel handler at packages/babel-plugin/src/css-fragment/index.ts — recognise cssFragment() calls, store statically evaluated object, resolve at consumption sites via resolveBinding, invoke deep-merge-styles for array composition
-- [ ] T064 [US3] Route cssFragment CallExpression to visitCssFragmentPath in packages/babel-plugin/src/babel-plugin.ts
-- [ ] T065 [US3] Add circular reference detection in cssFragment resolution — track visited fragments during resolution chain, emit error on cycle
-- [ ] T066 [US3] Integrate array composition into globalStylesheet handler — when a selector value is an array, resolve fragments and deep-merge before CSS serialisation
-- [ ] T067 [US3] Integrate array composition into cssMap handler — same array resolution for cssMap selector values
-- [ ] T068 [US3] Verify all US3 snapshot tests pass — update snapshots after confirming output is correct
+- [x] T063 [US3] Create cssFragment Babel handler at packages/babel-plugin/src/css-fragment/index.ts — recognise cssFragment() calls, store statically evaluated object, resolve at consumption sites via resolveBinding, invoke deep-merge-styles for array composition
+- [x] T064 [US3] Route cssFragment CallExpression to visitCssFragmentPath in packages/babel-plugin/src/babel-plugin.ts
+- [x] T065 [US3] Add circular reference detection in cssFragment resolution — track visited fragments during resolution chain, emit error on cycle
+- [x] T066 [US3] Integrate array composition into globalStylesheet handler — when a selector value is an array, resolve fragments and deep-merge before CSS serialisation
+- [x] T067 [US3] Integrate array composition into cssMap handler — same array resolution for cssMap selector values
+- [x] T068 [US3] Verify all US3 snapshot tests pass — update snapshots after confirming output is correct
 
 **Checkpoint**: cssFragment enables cross-file style reuse. Deep-merge handles overlapping nested selectors. Circular references caught.
 
@@ -183,14 +183,14 @@
 
 ### Tests for User Story 4 ⚠️
 
-- [ ] T069 [P] [US4] Write snapshot test: globalStylesheet with legacy/experiment keys produces two distinct CSS blocks and class names at packages/babel-plugin/src/global-stylesheet/**tests**/global-stylesheet.test.ts
-- [ ] T070 [P] [US4] Write test: conditional class name application (ternary) works in transformed output at packages/babel-plugin/src/global-stylesheet/**tests**/global-stylesheet.test.ts
+- [x] T069 [P] [US4] Write snapshot test: globalStylesheet with legacy/experiment keys produces two distinct CSS blocks and class names at packages/babel-plugin/src/global-stylesheet/**tests**/global-stylesheet.test.ts
+- [x] T070 [P] [US4] Write test: conditional class name application (ternary) works in transformed output at packages/babel-plugin/src/global-stylesheet/**tests**/global-stylesheet.test.ts
 
 ### Implementation for User Story 4
 
-- [ ] T071 [US4] Verify per-key class name generation in globalStylesheet handler handles multiple keys correctly (this should already work from US2 — validate with tests)
-- [ ] T072 [US4] Verify conditional expressions referencing globalStylesheet keys pass through untransformed (the runtime toggles class names, not the Babel plugin)
-- [ ] T073 [US4] Verify all US4 snapshot tests pass
+- [x] T071 [US4] Verify per-key class name generation in globalStylesheet handler handles multiple keys correctly (this should already work from US2 — validate with tests)
+- [x] T072 [US4] Verify conditional expressions referencing globalStylesheet keys pass through untransformed (the runtime toggles class names, not the Babel plugin)
+- [x] T073 [US4] Verify all US4 snapshot tests pass
 
 **Checkpoint**: Feature flag gating works via per-key class name toggling. Both variant CSS blocks ship in extracted output.
 
@@ -200,17 +200,17 @@
 
 **Purpose**: Improvements that affect multiple user stories
 
-- [ ] T074 [P] Write README.md for @compiled/vanilla at packages/vanilla/README.md — API overview, usage examples, build instructions
-- [ ] T075 [P] Write README.md for @compiled/runtime at packages/runtime/README.md — shared runtime utilities overview
-- [ ] T076 [P] Add sideEffects declaration to packages/vanilla/package.json — ["**/*.compiled.css", "**/*.global.css"]
-- [ ] T077 [P] Create changeset for @compiled/runtime — minor version, describe new shared runtime package extracted from @compiled/react
-- [ ] T078 [P] Create changeset for @compiled/react — minor version, describe runtime utilities now re-exported from @compiled/runtime
-- [ ] T079 [P] Create changeset for @compiled/vanilla — minor version, describe new package and APIs
-- [ ] T080 [P] Create changeset for @compiled/babel-plugin — minor version, describe vanilla import source support
-- [ ] T081 [P] Create changeset for @compiled/babel-plugin-strip-runtime — minor version, describe .global.css extraction
-- [ ] T082 [P] Create changeset for @compiled/utils — patch version, describe DEFAULT_IMPORT_SOURCES addition
+- [x] T074 [P] Write README.md for @compiled/vanilla at packages/vanilla/README.md — API overview, usage examples, build instructions
+- [x] T075 [P] Write README.md for @compiled/runtime at packages/runtime/README.md — shared runtime utilities overview
+- [x] T076 [P] Add sideEffects declaration to packages/vanilla/package.json — ["**/*.compiled.css", "**/*.global.css"]
+- [x] T077 [P] Create changeset for @compiled/runtime — minor version, describe new shared runtime package extracted from @compiled/react
+- [x] T078 [P] Create changeset for @compiled/react — minor version, describe runtime utilities now re-exported from @compiled/runtime
+- [x] T079 [P] Create changeset for @compiled/vanilla — minor version, describe new package and APIs
+- [x] T080 [P] Create changeset for @compiled/babel-plugin — minor version, describe vanilla import source support
+- [x] T081 [P] Create changeset for @compiled/babel-plugin-strip-runtime — minor version, describe .global.css extraction
+- [x] T082 [P] Create changeset for @compiled/utils — patch version, describe DEFAULT_IMPORT_SOURCES addition
 - [ ] T083 Verify full monorepo build succeeds: yarn build (CJS + ESM + browser)
-- [ ] T084 Run full test suite: yarn test — verify no regressions in existing packages (especially @compiled/react after runtime extraction)
+- [x] T084 Run full test suite: yarn test — verify no regressions in existing packages (especially @compiled/react after runtime extraction)
 - [ ] T085 Run lint and prettier: yarn lint && yarn prettier:check
 - [ ] T086 Verify .global.css files are correctly picked up by Webpack and Parcel bundler integration tests
 - [ ] T087 Run quickstart.md validation — execute all commands from specs/001-compiled-vanilla/quickstart.md and verify they work

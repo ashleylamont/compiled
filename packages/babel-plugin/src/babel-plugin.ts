@@ -14,8 +14,11 @@ import {
 } from '@compiled/utils';
 
 import { visitClassNamesPath } from './class-names';
+import { visitVanillaClassNamesPath } from './class-names-vanilla';
+import { visitCssFragmentPath } from './css-fragment';
 import { visitCssMapPath } from './css-map';
 import { visitCssPropPath } from './css-prop';
+import { visitGlobalStylesheetPath } from './global-stylesheet';
 import { visitStyledPath } from './styled';
 import type { State } from './types';
 import { appendRuntimeImports } from './utils/append-runtime-imports';
@@ -29,6 +32,9 @@ import {
   isCompiledStyledCallExpression,
   isCompiledStyledTaggedTemplateExpression,
   isCompiledCSSMapCallExpression,
+  isCompiledClassNamesCallExpression,
+  isCompiledGlobalStylesheetCallExpression,
+  isCompiledCssFragmentCallExpression,
 } from './utils/is-compiled';
 import { isTransformedJsxFunction } from './utils/is-jsx-function';
 import { normalizePropsUsage } from './utils/normalize-props-usage';
@@ -272,7 +278,18 @@ export default declare<State>((api) => {
             return;
           }
 
-          (['styled', 'ClassNames', 'css', 'keyframes', 'cssMap'] as const).forEach((apiName) => {
+          (
+            [
+              'styled',
+              'ClassNames',
+              'css',
+              'keyframes',
+              'cssMap',
+              'classNames',
+              'globalStylesheet',
+              'cssFragment',
+            ] as const
+          ).forEach((apiName) => {
             if (
               state.compiledImports &&
               t.isIdentifier(specifier.node?.imported) &&
@@ -315,6 +332,21 @@ Reasons this might happen:
 
         if (isCompiledCSSMapCallExpression(path.node, state)) {
           visitCssMapPath(path, { context: 'root', state, parentPath: path });
+          return;
+        }
+
+        if (isCompiledClassNamesCallExpression(path.node, state)) {
+          visitVanillaClassNamesPath(path, { context: 'root', state, parentPath: path });
+          return;
+        }
+
+        if (isCompiledGlobalStylesheetCallExpression(path.node, state)) {
+          visitGlobalStylesheetPath(path, { context: 'root', state, parentPath: path });
+          return;
+        }
+
+        if (isCompiledCssFragmentCallExpression(path.node, state)) {
+          visitCssFragmentPath(path, { context: 'root', state, parentPath: path });
           return;
         }
 

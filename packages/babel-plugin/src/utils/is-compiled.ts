@@ -65,6 +65,51 @@ export const isCompiledCSSMapCallExpression = (
   !!state.compiledImports?.cssMap?.includes(node.callee.name);
 
 /**
+ * Returns `true` if the node is using `classNames` from `@compiled/vanilla` as a call expression
+ *
+ * @param node {t.Node} The node that is being checked
+ * @param state {State} Plugin state
+ * @returns {boolean} Whether the node is a compiled classNames
+ */
+export const isCompiledClassNamesCallExpression = (
+  node: t.Node,
+  state: State
+): node is t.CallExpression =>
+  t.isCallExpression(node) &&
+  t.isIdentifier(node.callee) &&
+  !!state.compiledImports?.classNames?.includes(node.callee.name);
+
+/**
+ * Returns `true` if the node is using `globalStylesheet` from `@compiled/vanilla` as a call expression
+ *
+ * @param node {t.Node} The node that is being checked
+ * @param state {State} Plugin state
+ * @returns {boolean} Whether the node is a compiled globalStylesheet
+ */
+export const isCompiledGlobalStylesheetCallExpression = (
+  node: t.Node,
+  state: State
+): node is t.CallExpression =>
+  t.isCallExpression(node) &&
+  t.isIdentifier(node.callee) &&
+  !!state.compiledImports?.globalStylesheet?.includes(node.callee.name);
+
+/**
+ * Returns `true` if the node is using `cssFragment` from `@compiled/vanilla` as a call expression
+ *
+ * @param node {t.Node} The node that is being checked
+ * @param state {State} Plugin state
+ * @returns {boolean} Whether the node is a compiled cssFragment
+ */
+export const isCompiledCssFragmentCallExpression = (
+  node: t.Node,
+  state: State
+): node is t.CallExpression =>
+  t.isCallExpression(node) &&
+  t.isIdentifier(node.callee) &&
+  !!state.compiledImports?.cssFragment?.includes(node.callee.name);
+
+/**
  * Returns `true` if the node is using `keyframes` from `@compiled/react` as a tagged template expression
  *
  * @param node {t.Node} The node that is being checked

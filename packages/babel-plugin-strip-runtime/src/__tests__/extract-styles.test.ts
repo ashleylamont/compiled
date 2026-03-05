@@ -6,6 +6,13 @@ import { transform } from './transform';
 // We aren't processing the result anyway, so no need for specifying the response
 jest.mock('fs');
 
+// Pre-transformed code as emitted by @compiled/vanilla globalStylesheet handler
+const injectGlobalStylesCode = `
+  import { injectGlobalStyles } from '@compiled/vanilla/runtime';
+  export const styles = { tableCell: 'gs_abc1234' };
+  injectGlobalStyles('.gs_abc1234 .pm-table-cell{padding:8px}', 'gs_abc1234');
+`;
+
 describe('babel-plugin-strip-runtime with stylesheet extraction (extractStylesToDirectory)', () => {
   describe('with the classic runtime', () => {
     const runtime = 'classic';
@@ -161,5 +168,78 @@ describe('babel-plugin-strip-runtime with stylesheet extraction (extractStylesTo
         `);
       });
     });
+  });
+});
+
+describe('babel-plugin-strip-runtime handling injectGlobalStyles()', () => {
+  const runtime = 'classic';
+
+  it('removes the injectGlobalStyles() call from output', () => {
+    const actual = transform(injectGlobalStylesCode, {
+      run: 'extract',
+      runtime,
+      extractStylesToDirectory: { source: 'src/', dest: 'dist/' },
+    });
+
+    expect(actual).not.toContain('injectGlobalStyles');
+  });
+
+  it('removes the import { injectGlobalStyles } from @compiled/vanilla/runtime', () => {
+    const actual = transform(injectGlobalStylesCode, {
+      run: 'extract',
+      runtime,
+      extractStylesToDirectory: { source: 'src/', dest: 'dist/' },
+    });
+
+    expect(actual).not.toContain('@compiled/vanilla/runtime');
+  });
+
+  it('adds a .global.css import to the file', () => {
+    const actual = transform(injectGlobalStylesCode, {
+      run: 'extract',
+      runtime,
+      extractStylesToDirectory: { source: 'src/', dest: 'dist/' },
+    });
+
+    expect(actual).toContain("import './app.global.css'");
+  });
+
+  it('preserves non-stripped exports', () => {
+    const actual = transform(injectGlobalStylesCode, {
+      run: 'extract',
+      runtime,
+      extractStylesToDirectory: { source: 'src/', dest: 'dist/' },
+    });
+
+    expect(actual).toContain("tableCell: 'gs_abc1234'");
+  });
+
+  it('writes the CSS content to app.global.css', () => {
+    transform(injectGlobalStylesCode, {
+      run: 'extract',
+      runtime,
+      extractStylesToDirectory: { source: 'src/', dest: 'dist/' },
+    });
+
+    expect(writeFileSync).toBeCalledWith(
+      expect.stringContaining('app.global.css'),
+      '.gs_abc1234 .pm-table-cell{padding:8px}'
+    );
+  });
+
+  it('works without extractStylesToDirectory (writes alongside source file)', () => {
+    const actual = transform(injectGlobalStylesCode, {
+      run: 'extract',
+      runtime,
+    });
+
+    expect(actual).not.toContain('injectGlobalStyles');
+    expect(actual).not.toContain('@compiled/vanilla/runtime');
+    expect(actual).toContain("import './app.global.css'");
+
+    expect(writeFileSync).toBeCalledWith(
+      expect.stringContaining('app.global.css'),
+      '.gs_abc1234 .pm-table-cell{padding:8px}'
+    );
   });
 });

@@ -15,6 +15,9 @@ import { isCreateElement } from './utils/is-create-element';
 import { removeStyleDeclarations } from './utils/remove-style-declarations';
 import { toURIComponent } from './utils/to-uri-component';
 
+const INJECT_GLOBAL_STYLES_SOURCE = '@compiled/vanilla/runtime';
+const INJECT_GLOBAL_STYLES_NAME = 'injectGlobalStyles';
+
 export default declare<PluginPass>((api) => {
   api.assertVersion(7);
 
@@ -22,6 +25,7 @@ export default declare<PluginPass>((api) => {
     name: '@compiled/babel-plugin-strip-runtime',
     pre() {
       this.styleRules = [];
+      (this as any).globalStyleRules = [];
     },
     visitor: {
       Program: {
@@ -100,7 +104,59 @@ export default declare<PluginPass>((api) => {
               t.importDeclaration([], t.stringLiteral(`./${cssFilename}`))
             );
           }
+
+          // Handle global styles collected from injectGlobalStyles() calls
+          const globalStyleRules: string[] = (this as any).globalStyleRules;
+          if (globalStyleRules.length > 0) {
+            const globalCssFilename = `${parse(filename).name}.global.css`;
+
+            if (this.opts.extractStylesToDirectory) {
+              if (!file.opts.generatorOpts?.sourceFileName) {
+                throw new Error(`Source filename was not defined`);
+              }
+              const sourceFileName = file.opts.generatorOpts.sourceFileName;
+              if (!sourceFileName.includes(this.opts.extractStylesToDirectory.source)) {
+                throw new Error(
+                  `Source directory '${this.opts.extractStylesToDirectory.source}' was not found relative to source file ('${sourceFileName}')`
+                );
+              }
+
+              const relativePath = sourceFileName.slice(
+                sourceFileName.indexOf(this.opts.extractStylesToDirectory.source) +
+                  this.opts.extractStylesToDirectory.source.length
+              );
+
+              const globalCssFilePath = join(
+                this.cwd,
+                this.opts.extractStylesToDirectory.dest,
+                dirname(relativePath),
+                globalCssFilename
+              );
+              mkdirSync(dirname(globalCssFilePath), { recursive: true });
+              writeFileSync(globalCssFilePath, globalStyleRules.join('\n'));
+            } else {
+              // Write alongside the source file
+              const globalCssFilePath = join(dirname(filename), globalCssFilename);
+              mkdirSync(dirname(globalCssFilePath), { recursive: true });
+              writeFileSync(globalCssFilePath, globalStyleRules.join('\n'));
+            }
+
+            // Add global css import to file
+            path.unshiftContainer(
+              'body',
+              t.importDeclaration([], t.stringLiteral(`./${globalCssFilename}`))
+            );
+          }
         },
+      },
+
+      ImportDeclaration(path) {
+        if (path.node.source.value !== INJECT_GLOBAL_STYLES_SOURCE) {
+          return;
+        }
+        // Remove the entire import declaration for @compiled/vanilla/runtime
+        // (it only exports injectGlobalStyles which we strip)
+        path.remove();
       },
 
       ImportSpecifier(path) {
@@ -139,6 +195,23 @@ export default declare<PluginPass>((api) => {
 
       CallExpression(path, pass) {
         const callee = path.node.callee;
+
+        // Detect injectGlobalStyles(cssString, scopingClass) calls
+        if (t.isIdentifier(callee) && callee.name === INJECT_GLOBAL_STYLES_NAME) {
+          const firstArg = path.node.arguments[0];
+          if (t.isStringLiteral(firstArg)) {
+            (pass as any).globalStyleRules.push(firstArg.value);
+          }
+          // Remove the call expression statement
+          const parentPath = path.parentPath;
+          if (parentPath && t.isExpressionStatement(parentPath.node)) {
+            parentPath.remove();
+          } else {
+            path.remove();
+          }
+          return;
+        }
+
         if (isCreateElement(callee)) {
           // We've found something that looks like React.createElement(...)
           // Now we want to check if it's from the Compiled Runtime and if it is - replace with its children.

@@ -8,4 +8,4 @@ export const COMPILED_IMPORT = '@compiled/react';
  * A list of first-class packages we treat as valid import sources for Compiled.
  * Eg. for the `jsx` pragma, for `css` function, etc.
  */
-export const DEFAULT_IMPORT_SOURCES = [COMPILED_IMPORT, '@atlaskit/css'];
+export const DEFAULT_IMPORT_SOURCES = [COMPILED_IMPORT, '@atlaskit/css', '@compiled/vanilla'];
