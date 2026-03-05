@@ -148,6 +148,12 @@ export interface State extends PluginPass {
     cssFragment?: string[];
   };
 
+  /**
+   * Set to true when the file imports from a source that supports the css JSX prop
+   * (i.e. any compiled source except @compiled/vanilla).
+   */
+  cssPropEnabled?: boolean;
+
   usesXcss?: boolean;
 
   importedCompiledImports?: {

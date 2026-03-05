@@ -145,6 +145,7 @@ export default declare<State>((api) => {
             if (jsxSourceMatches && this.importSources.includes(jsxSourceMatches[1])) {
               // jsxImportSource pragma found - turn on CSS prop!
               state.compiledImports = {};
+              state.cssPropEnabled = true;
               state.pragma.jsxImportSource = true;
               jsxComment = comment;
             }
@@ -155,6 +156,7 @@ export default declare<State>((api) => {
               jsxMatches[1] === state.pragma.classicJsxPragmaLocalName
             ) {
               state.compiledImports = {};
+              state.cssPropEnabled = true;
               state.pragma.jsx = true;
               jsxComment = comment;
             }
@@ -268,8 +270,14 @@ export default declare<State>((api) => {
           return;
         }
 
-        // The presence of the module enables CSS prop
+        // The presence of the module enables compiled imports tracking
         state.compiledImports = state.compiledImports || {};
+
+        // Enable the css JSX prop only for sources that support it
+        // (all compiled sources except @compiled/vanilla, which has no JSX integration)
+        if (userLandModule !== '@compiled/vanilla') {
+          state.cssPropEnabled = true;
+        }
 
         // Go through each import and enable each found API
         path.get('specifiers').forEach((specifier) => {
@@ -393,7 +401,7 @@ Reasons this might happen:
           visitXcssPropPath(path, { context: 'root', state, parentPath: path });
         }
 
-        if (state.compiledImports) {
+        if (state.cssPropEnabled) {
           visitCssPropPath(path, { context: 'root', state, parentPath: path });
         }
       },

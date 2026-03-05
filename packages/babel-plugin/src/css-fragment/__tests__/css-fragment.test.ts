@@ -66,7 +66,7 @@ describe('cssFragment', () => {
         cell: "gs_18oglda",
       };
       injectGlobalStyles(
-        ".gs_18oglda .child{color:red}.gs_18oglda .child{font-size:14px}",
+        ".gs_18oglda .child{color:red;font-size:14px}",
         "gs_18oglda"
       );
       "
@@ -109,16 +109,40 @@ describe('cssFragment', () => {
     expect(result).toContain('background-color:red');
   });
 
-  it('throws when cssFragment contains a runtime variable', () => {
-    expect(() =>
-      transform(
-        `
-        import { cssFragment } from '@compiled/vanilla';
-        const dynamic = 'red';
-        const frag = cssFragment({ color: dynamic });
-        `,
-        { filename: 'test-file.ts' }
-      )
-    ).toThrow('cssFragment() values must be statically evaluable');
+  it('allows const primitive bindings as values', () => {
+    // const bindings with primitive values are safe to inline — the value is
+    // statically known and immutable. cssFragment just strips the wrapper,
+    // and the consuming site (globalStylesheet) will resolve the identifier.
+    const result = transform(
+      `
+      import { cssFragment } from '@compiled/vanilla';
+      const myColor = 'red';
+      const mySize = 12;
+      const frag = cssFragment({ color: myColor, fontSize: mySize });
+      `,
+      { filename: 'test-file.ts' }
+    );
+    // Should not throw — const primitives are safe
+    expect(result).toContain('color: myColor');
+    expect(result).toContain('fontSize: mySize');
+  });
+
+  it('allows const string bindings in globalStylesheet (non-composed)', () => {
+    // When a cssFragment with const bindings is used directly as a selector value
+    // (not via array composition), buildCss resolves the identifiers normally.
+    const result = transform(
+      `
+      import { globalStylesheet } from '@compiled/vanilla';
+      const padding = '8px';
+      export const styles = globalStylesheet({
+        cell: {
+          '.child': { padding: padding, color: 'blue' },
+        },
+      });
+      `,
+      { filename: 'test-file.ts' }
+    );
+    expect(result).toContain('padding:8px');
+    expect(result).toContain('color:blue');
   });
 });

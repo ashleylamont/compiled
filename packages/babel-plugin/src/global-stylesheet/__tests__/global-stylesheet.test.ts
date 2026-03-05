@@ -1,4 +1,9 @@
-import { transform } from '../../test-utils';
+import { join } from 'path';
+
+import { transform as transformCode } from '../../test-utils';
+
+const transform = (code: string, opts: Record<string, unknown> = {}) =>
+  transformCode(code, opts as Parameters<typeof transformCode>[1]);
 
 describe('globalStylesheet', () => {
   it('basic: single key with nested selector', () => {
@@ -175,19 +180,291 @@ describe('globalStylesheet', () => {
     expect(result).toContain('injectGlobalStyles');
   });
 
-  it('throws when a value contains a truly dynamic runtime value (function parameter)', () => {
-    expect(() =>
-      transform(
+  it('handles full spike scenario: cssFragment + pre-resolved tokens + array composition + multiple keys', () => {
+    // Simulates the AFP scenario where the tokens babel plugin has already run,
+    // converting token() calls to string literals like 'var(--ds-border-danger, red)'.
+    const result = transform(
+      `
+      import { globalStylesheet, cssFragment } from '@compiled/vanilla';
+
+      const dangerHighlight = cssFragment({
+        borderColor: 'var(--ds-border-danger, red)',
+        borderWidth: 2,
+        borderStyle: 'solid',
+        borderRadius: 4,
+      });
+
+      const spikeStyles = globalStylesheet({
+        decisions: {
+          '.ProseMirror [data-decision-wrapper]': [
+            dangerHighlight,
+            {
+              backgroundColor: 'var(--ds-background-danger, #ffebe6)',
+            },
+          ],
+          '.ProseMirror [data-decision-wrapper] span': {
+            color: 'var(--ds-text-danger, red)',
+          },
+        },
+        editorBorder: {
+          '.ProseMirror': {
+            border: '3px dashed var(--ds-border-brand, blue)',
+            borderRadius: 8,
+            padding: 12,
+          },
+        },
+      });
+      `,
+      { filename: 'test-spike.ts' }
+    );
+    // Log the full output for debugging
+    console.log('FULL OUTPUT:', result);
+
+    // Should produce injectGlobalStyles for both keys
+    expect(result).toContain('injectGlobalStyles');
+    // editorBorder should have correct CSS
+    expect(result).toContain('border-radius:8px');
+    expect(result).toContain('padding:12px');
+    // Selectors should be preserved correctly — not mangled
+    expect(result).toContain('.ProseMirror [data-decision-wrapper]');
+    expect(result).toContain('.ProseMirror [data-decision-wrapper] span');
+    // Token CSS vars should appear in the CSS
+    expect(result).toContain('var(--ds-border-danger, red)');
+    expect(result).toContain('var(--ds-background-danger, #ffebe6)');
+    expect(result).toContain('var(--ds-text-danger, red)');
+  });
+
+  it('handles token() calls via injectGlobalCssVariables', () => {
+    const result = transform(
+      `
+      import { globalStylesheet } from '@compiled/vanilla';
+      import { token } from '@atlaskit/tokens';
+      export const styles = globalStylesheet({
+        cell: {
+          '.child': { color: token('color.text.danger', 'red'), padding: '8px' },
+        },
+      });
+      `,
+      { filename: 'test-file.ts' }
+    );
+    // CSS should contain var(--_hash) for the token() call
+    expect(result).toContain('injectGlobalStyles');
+    expect(result).toContain('var(--_');
+    expect(result).toContain('padding:8px');
+    // Should emit injectGlobalCssVariables with the token() expression
+    expect(result).toContain('injectGlobalCssVariables');
+    expect(result).toContain('token(');
+  });
+
+  it('handles dynamic runtime values via injectGlobalCssVariables', () => {
+    const result = transform(
+      `
+      import { globalStylesheet } from '@compiled/vanilla';
+      export const styles = globalStylesheet({
+        tableCell: {
+          '.pm-table-cell': { padding: window.myPadding },
+        },
+      });
+      `,
+      { filename: 'test-file.ts' }
+    );
+    // Dynamic values produce CSS variables + injectGlobalCssVariables call
+    expect(result).toContain('injectGlobalCssVariables');
+    expect(result).toContain('var(--_');
+    expect(result).toContain('window.myPadding');
+  });
+
+  describe('bug reproductions', () => {
+    it('does not kebab-case CSS selectors (selector mangling bug)', () => {
+      // BUG: buildCss treats object keys as CSS property names and kebab-cases them.
+      // `.ProseMirror` was becoming `.-prose-mirror` because buildCss kebab-cases all keys.
+      // Selectors must be passed through as-is.
+      const result = transform(
         `
         import { globalStylesheet } from '@compiled/vanilla';
         export const styles = globalStylesheet({
-          tableCell: {
-            '.pm-table-cell': { padding: window.myPadding },
+          editor: {
+            '.ProseMirror': { padding: '8px' },
           },
         });
         `,
         { filename: 'test-file.ts' }
-      )
-    ).toThrow();
+      );
+      // The selector MUST be preserved exactly — not kebab-cased
+      expect(result).toContain('.ProseMirror');
+      expect(result).not.toContain('.-prose-mirror');
+      expect(result).not.toContain('Prose-mirror');
+    });
+
+    it('does not kebab-case complex selectors with attribute selectors', () => {
+      // BUG: `.ProseMirror [data-decision-wrapper]` was becoming
+      // `.-prose-mirror [data-decision-wrapper]`
+      const result = transform(
+        `
+        import { globalStylesheet } from '@compiled/vanilla';
+        export const styles = globalStylesheet({
+          decisions: {
+            '.ProseMirror [data-decision-wrapper]': {
+              backgroundColor: 'yellow',
+            },
+          },
+        });
+        `,
+        { filename: 'test-file.ts' }
+      );
+      expect(result).toContain('.ProseMirror [data-decision-wrapper]');
+      expect(result).not.toContain('.-prose-mirror');
+      expect(result).toContain('background-color:yellow');
+    });
+
+    it('inlines cssFragment refs via deep-merge instead of creating CSS variables', () => {
+      // BUG: When cssFragment ref appears in an array like [dangerHighlight, {...}],
+      // buildCss can't resolve it and falls through to the catch-all, creating
+      // var(--_hash) instead of inlining the fragment's styles.
+      // The output was: `.gs_xxx .selector:var(--_lh50ie)` (garbled)
+      // Expected: `.gs_xxx .selector{border-color:red;background-color:yellow}`
+      const result = transform(
+        `
+        import { globalStylesheet, cssFragment } from '@compiled/vanilla';
+
+        const dangerHighlight = cssFragment({
+          borderColor: 'red',
+          borderWidth: 2,
+          borderStyle: 'solid',
+        });
+
+        export const styles = globalStylesheet({
+          decisions: {
+            '.ProseMirror [data-decision-wrapper]': [
+              dangerHighlight,
+              {
+                backgroundColor: 'yellow',
+              },
+            ],
+          },
+        });
+        `,
+        { filename: 'test-file.ts' }
+      );
+      // cssFragment properties must be inlined (deep-merged), not turned into CSS variables
+      expect(result).toContain('border-color:red');
+      expect(result).toContain('border-width:2px');
+      expect(result).toContain('border-style:solid');
+      expect(result).toContain('background-color:yellow');
+      // Must NOT have a CSS variable for the fragment ref
+      expect(result).not.toContain('var(--_');
+      // Selector must be preserved
+      expect(result).toContain('.ProseMirror [data-decision-wrapper]');
+      expect(result).not.toContain('.-prose-mirror');
+    });
+
+    it('resolves cssFragment imported from another file', () => {
+      // Cross-file: cssFragment defined in a fixture, imported and used in globalStylesheet
+      const result = transform(
+        `
+        import { globalStylesheet } from '@compiled/vanilla';
+        import { baseStyles } from '../../__fixtures__/mixins/fragments';
+
+        export const styles = globalStylesheet({
+          cell: {
+            '.child': baseStyles,
+          },
+        });
+        `,
+        { filename: join(__dirname, 'cross-file-test.ts') }
+      );
+      expect(result).toContain('color:red');
+      expect(result).toContain('font-size:14px');
+      expect(result).toContain('.child');
+    });
+
+    it('resolves cssFragment call expression imported from another file via array composition', () => {
+      // Cross-file: cssFragment() call in another file, consumed via array in globalStylesheet
+      const result = transform(
+        `
+        import { globalStylesheet } from '@compiled/vanilla';
+        import { dangerHighlight } from '../../__fixtures__/mixins/fragments';
+
+        export const styles = globalStylesheet({
+          cell: {
+            '.child': [dangerHighlight, { color: 'blue' }],
+          },
+        });
+        `,
+        { filename: join(__dirname, 'cross-file-test.ts') }
+      );
+      expect(result).toContain('border-color:red');
+      expect(result).toContain('border-width:2px');
+      expect(result).toContain('border-style:solid');
+      expect(result).toContain('color:blue');
+      expect(result).toContain('.child');
+      // Should not create CSS variables for the fragment
+      expect(result).not.toContain('var(--_');
+    });
+
+    it('handles the full spike scenario correctly end-to-end', () => {
+      // Full reproduction of the AFP spike scenario:
+      // - cssFragment composition via array
+      // - pre-resolved token values (strings)
+      // - multiple variant keys
+      // - complex selectors with attribute selectors
+      const result = transform(
+        `
+        import { globalStylesheet, cssFragment } from '@compiled/vanilla';
+
+        const dangerHighlight = cssFragment({
+          borderColor: 'var(--ds-border-danger, red)',
+          borderWidth: 2,
+          borderStyle: 'solid',
+          borderRadius: 4,
+        });
+
+        const spikeStyles = globalStylesheet({
+          decisions: {
+            '.ProseMirror [data-decision-wrapper]': [
+              dangerHighlight,
+              {
+                backgroundColor: 'var(--ds-background-danger, #ffebe6)',
+              },
+            ],
+            '.ProseMirror [data-decision-wrapper] span': {
+              color: 'var(--ds-text-danger, red)',
+            },
+          },
+          editorBorder: {
+            '.ProseMirror': {
+              border: '3px dashed var(--ds-border-brand, blue)',
+              borderRadius: 8,
+              padding: 12,
+            },
+          },
+        });
+        `,
+        { filename: 'test-spike.ts' }
+      );
+      // Selectors must be preserved verbatim
+      expect(result).toContain('.ProseMirror [data-decision-wrapper]');
+      expect(result).toContain('.ProseMirror [data-decision-wrapper] span');
+      expect(result).not.toContain('.-prose-mirror');
+
+      // cssFragment properties must be deep-merged and inlined
+      expect(result).toContain('border-color:var(--ds-border-danger, red)');
+      expect(result).toContain('border-width:2px');
+      expect(result).toContain('border-style:solid');
+      expect(result).toContain('border-radius:4px');
+      // Inline styles from the array must also be present
+      expect(result).toContain('background-color:var(--ds-background-danger, #ffebe6)');
+
+      // Second selector's styles
+      expect(result).toContain('color:var(--ds-text-danger, red)');
+
+      // editorBorder key styles
+      expect(result).toContain('border-radius:8px');
+      expect(result).toContain('padding:12px');
+
+      // No CSS variables should be created for pre-resolved token strings
+      expect(result).not.toContain('var(--_');
+      expect(result).not.toContain('injectGlobalCssVariables');
+    });
   });
 });

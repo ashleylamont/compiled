@@ -6,16 +6,19 @@ import { visitCssFragmentPath } from '../css-fragment';
 import type { Metadata } from '../types';
 import { buildCodeFrameError } from '../utils/ast';
 import { buildCss, getItemCss } from '../utils/css-builders';
+import { deepMergeStyles } from '../utils/deep-merge-styles';
+import { evaluateExpression } from '../utils/evaluate-expression';
+import { resolveBinding } from '../utils/resolve-binding';
 
 const VANILLA_RUNTIME_MODULE = '@compiled/vanilla/runtime';
 
 /**
- * Adds `injectGlobalStyles` import from `@compiled/vanilla/runtime` to the program,
+ * Adds a named import from `@compiled/vanilla/runtime` to the program,
  * if not already present.
  */
-const ensureInjectGlobalStylesImport = (
+const ensureVanillaRuntimeImport = (
   programPath: NodePath<t.Program>,
-  localName: string
+  importedName: string
 ): void => {
   const body = programPath.get('body');
 
@@ -26,19 +29,24 @@ const ensureInjectGlobalStylesImport = (
 
   if (existing) {
     const hasIt = existing.node.specifiers.some(
-      (s) => t.isImportSpecifier(s) && t.isIdentifier(s.local) && s.local.name === localName
+      (s) =>
+        t.isImportSpecifier(s) &&
+        t.isIdentifier(s.imported) &&
+        s.imported.name === importedName &&
+        t.isIdentifier(s.local) &&
+        s.local.name === importedName
     );
     if (!hasIt) {
       (existing as NodePath<t.ImportDeclaration>).pushContainer(
         'specifiers',
-        t.importSpecifier(t.identifier(localName), t.identifier('injectGlobalStyles'))
+        t.importSpecifier(t.identifier(importedName), t.identifier(importedName))
       );
     }
   } else {
     programPath.unshiftContainer(
       'body',
       t.importDeclaration(
-        [t.importSpecifier(t.identifier(localName), t.identifier('injectGlobalStyles'))],
+        [t.importSpecifier(t.identifier(importedName), t.identifier(importedName))],
         t.stringLiteral(VANILLA_RUNTIME_MODULE)
       )
     );
@@ -203,64 +211,144 @@ export const visitGlobalStylesheetPath = (
     // CallExpression it can't handle it — so we visit those fragments first.
     preResolveCssFragments(property.value as t.Expression, meta);
 
-    // Use buildCss() to evaluate the property value — this handles token(), cssFragment
-    // references (via identifier resolution), arrays, nested objects, and all other
-    // expression types exactly the same way as cssMap and css() do.
+    // The property value is expected to be either:
+    // A) An object where top-level keys are CSS selectors (e.g. '.ProseMirror [data-decision-wrapper]')
+    //    and values are style objects or arrays for composition
+    // B) An array at the variant level for composition (e.g. [cssFragmentRef, { '.child': { ... } }])
+    //    where each element contains selector→style mappings
     //
-    // The property value is expected to be an object where:
-    // - top-level keys are CSS selectors (e.g. '.pm-table-cell')
-    // - values are style objects (or arrays of style objects for composition)
+    // We CANNOT pass the entire object to buildCss() because buildCss treats object
+    // keys as CSS property names and kebab-cases them. Selectors like `.ProseMirror`
+    // would become `.-prose-mirror` — garbled CSS.
     //
-    // We call buildCss on the whole object, which gives us CssItems.
-    // Each CssItem's css string is a declaration like `color: red;` already wrapped
-    // in a selector rule by the toCSSRule path inside buildCss when it encounters
-    // nested objects (since nested objects in the input become CSS rules).
-    //
-    // To get non-atomic output: we collect all unconditional CSS strings from the items
-    // and join them. Dynamic values (variables) are NOT supported in globalStylesheet
-    // (it must be fully static), so we throw if any CSS variables are produced.
-    let cssOutput;
-    try {
-      cssOutput = buildCss(property.value as t.Expression, meta);
-    } catch (e: any) {
+    // Instead, we resolve arrays via deep-merge first, then iterate selector keys
+    // manually, and only call buildCss() on the leaf-level declaration objects.
+    let selectorObj = property.value as t.Expression;
+
+    // Handle variant-level array composition: [cssFragmentRef, { '.child': { ... } }]
+    if (t.isArrayExpression(selectorObj)) {
+      selectorObj = resolveArrayToMergedObject(selectorObj, meta, callNode);
+    }
+
+    if (!t.isObjectExpression(selectorObj)) {
       throw buildCodeFrameError(
-        `globalStylesheet() values must be statically evaluable: ${e.message}`,
+        'globalStylesheet() variant values must be object expressions mapping selectors to style objects',
         callNode,
         meta.parentPath
       );
     }
 
-    if (cssOutput.variables.length > 0) {
-      throw buildCodeFrameError(
-        'globalStylesheet() values must be statically evaluable — dynamic values (CSS variables) are not supported',
-        callNode,
-        meta.parentPath
-      );
-    }
-
-    // Collect CSS strings from all unconditional items.
-    // buildCss on a nested object like { '.pm-table-cell': { padding: '8px' } } produces
-    // items with css like `.pm-table-cell { padding: 8px; }` (via toCSSRule).
-    // We then prepend the scoping class to each rule.
     const cssLines: string[] = [];
-    for (const item of cssOutput.css) {
-      if (item.type === 'unconditional' || item.type === 'sheet') {
-        const raw = getItemCss(item).trim();
-        if (!raw) continue;
-        // The raw CSS from buildCss for nested objects looks like:
-        // `.pm-table-cell { padding: 8px; }`
-        // We need to prepend the scoping class: `.gs_xxx .pm-table-cell { ... }`
-        // But buildCss wraps in the selector as-is; we need to insert the scoping class.
-        // Prepend `.${scopingClass} ` before the selector in each rule.
-        const scoped = prependScopingClass(raw, scopingClass);
-        if (scoped) cssLines.push(scoped);
-      } else if (item.type === 'logical' || item.type === 'conditional') {
+    const allVariables: {
+      name: string;
+      expression: t.Expression;
+      prefix?: string;
+      suffix?: string;
+    }[] = [];
+
+    for (const selectorProp of selectorObj.properties) {
+      if (!t.isObjectProperty(selectorProp)) {
         throw buildCodeFrameError(
-          'globalStylesheet() values must be statically evaluable — conditional expressions are not supported',
+          'globalStylesheet() values must be statically evaluable',
           callNode,
           meta.parentPath
         );
       }
+
+      // Get the selector key — pass through as-is, NO kebab-casing
+      let selector: string;
+      if (t.isIdentifier(selectorProp.key)) {
+        selector = selectorProp.key.name;
+      } else if (t.isStringLiteral(selectorProp.key)) {
+        selector = selectorProp.key.value;
+      } else {
+        throw buildCodeFrameError(
+          'globalStylesheet() selector keys must be string literals or identifiers',
+          callNode,
+          meta.parentPath
+        );
+      }
+
+      // Resolve the value: may be an object or an array (for composition)
+      let resolvedValueExpr: t.Expression = selectorProp.value as t.Expression;
+
+      if (t.isArrayExpression(resolvedValueExpr)) {
+        // Array composition: [cssFragmentRef, { backgroundColor: 'yellow' }]
+        resolvedValueExpr = resolveArrayToMergedObject(resolvedValueExpr, meta, callNode);
+      }
+
+      // Now resolvedValueExpr should be an ObjectExpression with CSS declarations.
+      // Use replaceExternalCallExpressions + buildCss on this leaf object.
+      const replacements = replaceExternalCallExpressions(resolvedValueExpr, meta);
+
+      let cssOutput;
+      try {
+        cssOutput = buildCss(resolvedValueExpr, meta);
+      } catch (e: any) {
+        restoreExternalCallExpressions(replacements);
+        throw buildCodeFrameError(
+          `globalStylesheet() values must be statically evaluable: ${e.message}`,
+          callNode,
+          meta.parentPath
+        );
+      }
+
+      // Restore the original call expressions and patch any CSS variables
+      restoreExternalCallExpressions(replacements);
+      for (const variable of cssOutput.variables) {
+        const replacement = replacements.find(
+          (r) => r.placeholderName === (variable.expression as t.Identifier).name
+        );
+        if (replacement) {
+          variable.expression = replacement.original;
+        }
+      }
+
+      // Collect CSS variables for injectGlobalCssVariables
+      allVariables.push(...cssOutput.variables);
+
+      // Collect CSS declarations and wrap them in the selector rule
+      for (const item of cssOutput.css) {
+        if (item.type === 'unconditional' || item.type === 'sheet') {
+          const raw = getItemCss(item).trim();
+          if (!raw) continue;
+          // raw is CSS declarations like `padding:8px;color:red;`
+          // Wrap in: `.gs_xxx selector{declarations}`
+          // Strip trailing semicolons for clean output
+          const minified = minifyCss(raw).replace(/;$/, '');
+          cssLines.push(`.${scopingClass} ${selector}{${minified}}`);
+        } else if (item.type === 'logical' || item.type === 'conditional') {
+          throw buildCodeFrameError(
+            'globalStylesheet() values must be statically evaluable — conditional expressions are not supported',
+            callNode,
+            meta.parentPath
+          );
+        }
+      }
+    }
+
+    // Emit injectGlobalCssVariables if any CSS variables were produced
+    if (allVariables.length > 0) {
+      const variableProperties = allVariables.map((variable) => {
+        let valueExpr: t.Expression = variable.expression;
+        if (variable.suffix || variable.prefix) {
+          const quasis: t.TemplateElement[] = [
+            t.templateElement({ raw: variable.prefix ?? '', cooked: variable.prefix ?? '' }),
+            t.templateElement({ raw: variable.suffix ?? '', cooked: variable.suffix ?? '' }, true),
+          ];
+          valueExpr = t.templateLiteral(quasis, [variable.expression]);
+        }
+        return t.objectProperty(t.stringLiteral(variable.name), valueExpr);
+      });
+
+      injectCalls.push(
+        t.expressionStatement(
+          t.callExpression(t.identifier('injectGlobalCssVariables'), [
+            t.stringLiteral(scopingClass),
+            t.objectExpression(variableProperties),
+          ])
+        )
+      );
     }
 
     const cssString = cssLines.join('');
@@ -291,13 +379,102 @@ export const visitGlobalStylesheetPath = (
     insertionPath.insertAfter(injectCalls[i]);
   }
 
-  // Ensure the import is present
+  // Ensure the imports are present
   const programPath = insertionPath.findParent((p) =>
     t.isProgram(p.node)
   ) as NodePath<t.Program> | null;
 
   if (programPath) {
-    ensureInjectGlobalStylesImport(programPath, injectGlobalStylesLocalName);
+    ensureVanillaRuntimeImport(programPath, injectGlobalStylesLocalName);
+    // If any CSS variables were emitted, also ensure injectGlobalCssVariables is imported
+    const hasVariables = injectCalls.some(
+      (call) =>
+        t.isCallExpression(call.expression) &&
+        t.isIdentifier(call.expression.callee) &&
+        call.expression.callee.name === 'injectGlobalCssVariables'
+    );
+    if (hasVariables) {
+      ensureVanillaRuntimeImport(programPath, 'injectGlobalCssVariables');
+    }
+  }
+};
+
+interface CallExprReplacement {
+  /** The parent ObjectProperty node containing the replaced value */
+  parent: t.ObjectProperty;
+  /** The original CallExpression node */
+  original: t.CallExpression;
+  /** The placeholder identifier name used as the replacement */
+  placeholderName: string;
+}
+
+/**
+ * Walks an ObjectExpression and replaces any CallExpression property values
+ * whose callee is an identifier imported from an external (non-compiled) module
+ * with a unique placeholder Identifier. This prevents buildCss from trying to
+ * resolve the import (which would fail for modules like @atlaskit/tokens that
+ * aren't available at compile time).
+ *
+ * Returns an array of replacements so they can be restored afterward.
+ */
+const replaceExternalCallExpressions = (
+  expr: t.Expression,
+  meta: Metadata
+): CallExprReplacement[] => {
+  const replacements: CallExprReplacement[] = [];
+  let counter = 0;
+
+  const walk = (node: t.Node): void => {
+    if (t.isObjectExpression(node)) {
+      for (const prop of node.properties) {
+        if (t.isObjectProperty(prop)) {
+          if (t.isCallExpression(prop.value)) {
+            const callee = prop.value.callee;
+            if (t.isIdentifier(callee)) {
+              // Check if the callee is imported from an external module
+              const binding = meta.parentPath.scope.getBinding(callee.name);
+              if (binding && t.isImportDeclaration(binding.path.parent)) {
+                const source = binding.path.parent.source.value;
+                // Skip compiled imports — buildCss knows how to handle those
+                const compiledSources = meta.state.opts.importSources ?? [
+                  '@compiled/react',
+                  '@compiled/vanilla',
+                  '@atlaskit/css',
+                ];
+                if (!compiledSources.includes(source)) {
+                  const placeholderName = `__compiled_gs_placeholder_${counter++}__`;
+                  replacements.push({
+                    parent: prop,
+                    original: prop.value,
+                    placeholderName,
+                  });
+                  prop.value = t.identifier(placeholderName);
+                }
+              }
+            }
+          } else {
+            // Recurse into nested objects / arrays
+            walk(prop.value);
+          }
+        }
+      }
+    } else if (t.isArrayExpression(node)) {
+      for (const elem of node.elements) {
+        if (elem) walk(elem);
+      }
+    }
+  };
+
+  walk(expr);
+  return replacements;
+};
+
+/**
+ * Restores call expressions that were replaced by replaceExternalCallExpressions.
+ */
+const restoreExternalCallExpressions = (replacements: CallExprReplacement[]): void => {
+  for (const { parent, original } of replacements) {
+    parent.value = original;
   }
 };
 
@@ -315,23 +492,168 @@ const minifyCss = (css: string): string =>
     .trim();
 
 /**
- * Prepends the scoping class to each CSS rule in a raw CSS string.
+ * Resolves an identifier to an ObjectExpression, handling both same-file bindings
+ * (where cssFragment has already been transformed to a plain object) and cross-file
+ * imports (where the resolved node may still be a cssFragment() CallExpression).
  *
- * buildCss produces strings like `.pm-table-cell { padding: 8px; }` for nested
- * selector objects. We need `.gs_abc1234 .pm-table-cell { padding: 8px; }`.
- *
- * For plain declarations without a selector (shouldn't happen in globalStylesheet
- * but handled defensively), we wrap them in the scoping class directly.
+ * Returns the ObjectExpression or null if the identifier can't be resolved.
  */
-const prependScopingClass = (raw: string, scopingClass: string): string => {
-  const trimmed = minifyCss(raw);
-  if (!trimmed) return '';
-
-  // If it already looks like a rule (contains `{`), prepend the scoping class before the selector.
-  if (trimmed.includes('{')) {
-    return `.${scopingClass} ${trimmed}`;
+const resolveIdentifierToObjectExpression = (
+  name: string,
+  meta: Metadata
+): t.ObjectExpression | null => {
+  // 1. Try same-file binding (cssFragment already transformed to ObjectExpression)
+  const binding = meta.parentPath.scope.getBinding(name);
+  if (binding && t.isVariableDeclarator(binding.path.node)) {
+    const init = binding.path.node.init;
+    if (init && t.isObjectExpression(init)) {
+      return init;
+    }
   }
 
-  // Plain declaration — wrap in scoping class rule
-  return `.${scopingClass}{${trimmed}}`;
+  // 2. Try cross-file resolution via resolveBinding
+  const resolved = resolveBinding(name, meta, evaluateExpression);
+  if (resolved && t.isExpression(resolved.node)) {
+    const node = resolved.node;
+
+    // Direct ObjectExpression (plain exported object)
+    if (t.isObjectExpression(node)) {
+      return node;
+    }
+
+    // cssFragment() CallExpression from another file — unwrap it
+    if (t.isCallExpression(node)) {
+      const callee = node.callee;
+      // Check if this looks like a cssFragment() call
+      const isCssFragment =
+        t.isIdentifier(callee) &&
+        (meta.state.compiledImports?.cssFragment?.includes(callee.name) ||
+          callee.name === 'cssFragment');
+      if (isCssFragment && node.arguments.length === 1 && t.isObjectExpression(node.arguments[0])) {
+        return node.arguments[0] as t.ObjectExpression;
+      }
+    }
+  }
+
+  return null;
+};
+
+/**
+ * Resolves an array of expressions (ObjectExpressions and identifier references)
+ * into a single deep-merged ObjectExpression AST node.
+ *
+ * Used for array composition: [cssFragmentRef, { backgroundColor: 'yellow' }]
+ */
+const resolveArrayToMergedObject = (
+  arrayExpr: t.ArrayExpression,
+  meta: Metadata,
+  callNode: t.CallExpression
+): t.ObjectExpression => {
+  const styleObjects: Record<string, unknown>[] = [];
+
+  for (const element of arrayExpr.elements) {
+    if (!element || !t.isExpression(element)) {
+      throw buildCodeFrameError(
+        'globalStylesheet() array elements must be expressions',
+        callNode,
+        meta.parentPath
+      );
+    }
+
+    let objExpr: t.ObjectExpression | null = null;
+
+    if (t.isObjectExpression(element)) {
+      objExpr = element;
+    } else if (t.isIdentifier(element)) {
+      objExpr = resolveIdentifierToObjectExpression(element.name, meta);
+      if (!objExpr) {
+        throw buildCodeFrameError(
+          `globalStylesheet() could not resolve identifier '${element.name}' to a style object. ` +
+            'Ensure it is a cssFragment() or a plain object literal.',
+          callNode,
+          meta.parentPath
+        );
+      }
+    } else {
+      throw buildCodeFrameError(
+        'globalStylesheet() array elements must be object expressions or cssFragment references',
+        callNode,
+        meta.parentPath
+      );
+    }
+
+    const evaluated = evaluateObjectExpressionStatic(objExpr);
+    if (evaluated === null) {
+      throw buildCodeFrameError(
+        'globalStylesheet() array elements must be statically evaluable style objects',
+        callNode,
+        meta.parentPath
+      );
+    }
+    styleObjects.push(evaluated);
+  }
+
+  const merged = deepMergeStyles(styleObjects);
+  return plainObjectToAst(merged);
+};
+
+/**
+ * Statically evaluates an ObjectExpression AST node into a plain JS object.
+ * Only supports string/number literals as values (nested objects allowed).
+ * Returns null if any value cannot be statically determined.
+ */
+const evaluateObjectExpressionStatic = (
+  node: t.ObjectExpression
+): Record<string, unknown> | null => {
+  const result: Record<string, unknown> = {};
+
+  for (const prop of node.properties) {
+    if (!t.isObjectProperty(prop)) return null;
+
+    let keyName: string;
+    if (t.isIdentifier(prop.key)) {
+      keyName = prop.key.name;
+    } else if (t.isStringLiteral(prop.key)) {
+      keyName = prop.key.value;
+    } else {
+      return null;
+    }
+
+    if (t.isObjectExpression(prop.value)) {
+      const nested = evaluateObjectExpressionStatic(prop.value);
+      if (nested === null) return null;
+      result[keyName] = nested;
+    } else if (t.isStringLiteral(prop.value)) {
+      result[keyName] = prop.value.value;
+    } else if (t.isNumericLiteral(prop.value)) {
+      result[keyName] = prop.value.value;
+    } else {
+      return null;
+    }
+  }
+
+  return result;
+};
+
+/**
+ * Converts a plain JS object back to an ObjectExpression AST node.
+ */
+const plainObjectToAst = (obj: Record<string, unknown>): t.ObjectExpression => {
+  const properties: t.ObjectProperty[] = [];
+
+  for (const [key, value] of Object.entries(obj)) {
+    let valueNode: t.Expression;
+    if (typeof value === 'string') {
+      valueNode = t.stringLiteral(value);
+    } else if (typeof value === 'number') {
+      valueNode = t.numericLiteral(value);
+    } else if (typeof value === 'object' && value !== null) {
+      valueNode = plainObjectToAst(value as Record<string, unknown>);
+    } else {
+      continue;
+    }
+    properties.push(t.objectProperty(t.identifier(key), valueNode));
+  }
+
+  return t.objectExpression(properties);
 };

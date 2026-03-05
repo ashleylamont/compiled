@@ -5,67 +5,6 @@ import type { Metadata } from '../types';
 import { buildCodeFrameError } from '../utils/ast';
 
 /**
- * Statically evaluates an ObjectExpression node into a plain JS object.
- * Only supports string/number literals as values (nested objects allowed).
- * Returns null if any value cannot be statically determined.
- */
-const evaluateObjectExpression = (node: t.ObjectExpression): Record<string, unknown> | null => {
-  const result: Record<string, unknown> = {};
-
-  for (const prop of node.properties) {
-    if (!t.isObjectProperty(prop)) {
-      return null;
-    }
-
-    let keyName: string;
-    if (t.isIdentifier(prop.key)) {
-      keyName = prop.key.name;
-    } else if (t.isStringLiteral(prop.key)) {
-      keyName = prop.key.value;
-    } else {
-      return null;
-    }
-
-    if (t.isObjectExpression(prop.value)) {
-      const nested = evaluateObjectExpression(prop.value);
-      if (nested === null) return null;
-      result[keyName] = nested;
-    } else if (t.isStringLiteral(prop.value)) {
-      result[keyName] = prop.value.value;
-    } else if (t.isNumericLiteral(prop.value)) {
-      result[keyName] = prop.value.value;
-    } else {
-      return null;
-    }
-  }
-
-  return result;
-};
-
-/**
- * Converts a plain JS object back to an ObjectExpression AST node.
- */
-const objectToAst = (obj: Record<string, unknown>): t.ObjectExpression => {
-  const properties: t.ObjectProperty[] = [];
-
-  for (const [key, value] of Object.entries(obj)) {
-    let valueNode: t.Expression;
-    if (typeof value === 'string') {
-      valueNode = t.stringLiteral(value);
-    } else if (typeof value === 'number') {
-      valueNode = t.numericLiteral(value);
-    } else if (typeof value === 'object' && value !== null) {
-      valueNode = objectToAst(value as Record<string, unknown>);
-    } else {
-      continue;
-    }
-    properties.push(t.objectProperty(t.stringLiteral(key), valueNode));
-  }
-
-  return t.objectExpression(properties);
-};
-
-/**
  * Transforms a `cssFragment()` call expression into a plain object literal.
  *
  * `cssFragment({ color: 'red' })` → `{ color: 'red' }`
@@ -141,16 +80,9 @@ export const visitCssFragmentPath = (
     );
   }
 
-  // Statically evaluate the argument
-  const evaluated = evaluateObjectExpression(arg);
-  if (evaluated === null) {
-    throw buildCodeFrameError(
-      'cssFragment() values must be statically evaluable',
-      callNode,
-      meta.parentPath
-    );
-  }
-
-  // Replace cssFragment({...}) with the plain object literal
-  path.replaceWith(objectToAst(evaluated));
+  // Replace cssFragment({...}) with the argument ObjectExpression directly.
+  // We don't need to evaluate it — just strip the cssFragment() wrapper.
+  // The consuming site (globalStylesheet, cssMap) will handle evaluation
+  // of any dynamic expressions like token() calls within the object.
+  path.replaceWith(arg);
 };

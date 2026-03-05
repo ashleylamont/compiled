@@ -4,6 +4,7 @@ export { globalStylesheet } from './global-stylesheet.js';
 export { cssFragment } from './css-fragment.js';
 export type {
   CSSProperties,
+  CSSStyleValue,
   CSSMapInput,
   GlobalStylesheetInput,
   CSSFragmentInput,
