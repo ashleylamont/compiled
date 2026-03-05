@@ -402,6 +402,73 @@ describe('globalStylesheet', () => {
       expect(result).not.toContain('var(--_');
     });
 
+    it('handles template literals with unresolved expressions via CSS variables', () => {
+      // When a cssFragment contains a template literal with expressions that can't
+      // be statically evaluated (e.g. token() calls that haven't been transformed yet),
+      // the array composition path should fall back to AST-level merging and let
+      // buildCss handle it via CSS variables + injectGlobalCssVariables.
+      const result = transform(
+        `
+        import { globalStylesheet, cssFragment } from '@compiled/vanilla';
+        import { token } from '@atlaskit/tokens';
+
+        const accentBorder = cssFragment({
+          borderLeft: \`3px solid \${token('color.border.brand', 'blue')}\`,
+        });
+
+        export const styles = globalStylesheet({
+          editor: {
+            '.ProseMirror': [
+              accentBorder,
+              { padding: '8px' },
+            ],
+          },
+        });
+        `,
+        { filename: join(__dirname, 'token-test.ts') }
+      );
+      // padding should be inlined statically
+      expect(result).toContain('padding:8px');
+      // The selector must be preserved
+      expect(result).toContain('.ProseMirror');
+      expect(result).not.toContain('.-prose-mirror');
+      // The template literal with token() should produce a CSS variable
+      expect(result).toContain('var(--_');
+      expect(result).toContain('injectGlobalCssVariables');
+      // border-left should be in the CSS (using a CSS variable)
+      expect(result).toContain('border-left');
+    });
+
+    it('handles template literals with zero expressions (post-token-plugin)', () => {
+      // After @atlaskit/tokens/babel-plugin runs, template literals like
+      // `3px solid ${token('color.border.brand', 'blue')}` become
+      // `3px solid var(--ds-border-brand, blue)` — still a TemplateLiteral AST node
+      // with zero expressions. evaluateObjectExpressionStatic must handle this.
+      const result = transform(
+        `
+        import { globalStylesheet, cssFragment } from '@compiled/vanilla';
+
+        const accentBorder = cssFragment({
+          borderLeft: \`3px solid var(--ds-border-brand, blue)\`,
+        });
+
+        export const styles = globalStylesheet({
+          editor: {
+            '.ProseMirror': [
+              accentBorder,
+              { padding: '8px' },
+            ],
+          },
+        });
+        `,
+        { filename: 'test-file.ts' }
+      );
+      expect(result).toContain('border-left:3px solid var(--ds-border-brand, blue)');
+      expect(result).toContain('padding:8px');
+      expect(result).toContain('.ProseMirror');
+      expect(result).not.toContain('var(--_');
+    });
+
     it('handles the full spike scenario correctly end-to-end', () => {
       // Full reproduction of the AFP spike scenario:
       // - cssFragment composition via array

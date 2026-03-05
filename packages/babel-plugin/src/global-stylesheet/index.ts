@@ -399,11 +399,11 @@ export const visitGlobalStylesheetPath = (
   }
 };
 
-interface CallExprReplacement {
+interface ExternalExprReplacement {
   /** The parent ObjectProperty node containing the replaced value */
   parent: t.ObjectProperty;
-  /** The original CallExpression node */
-  original: t.CallExpression;
+  /** The original expression node (CallExpression or TemplateLiteral) */
+  original: t.Expression;
   /** The placeholder identifier name used as the replacement */
   placeholderName: string;
 }
@@ -420,38 +420,56 @@ interface CallExprReplacement {
 const replaceExternalCallExpressions = (
   expr: t.Expression,
   meta: Metadata
-): CallExprReplacement[] => {
-  const replacements: CallExprReplacement[] = [];
+): ExternalExprReplacement[] => {
+  const replacements: ExternalExprReplacement[] = [];
   let counter = 0;
+
+  const isExternalCallExpression = (node: t.Expression): boolean => {
+    if (!t.isCallExpression(node) || !t.isIdentifier(node.callee)) return false;
+    const binding = meta.parentPath.scope.getBinding(node.callee.name);
+    if (!binding || !t.isImportDeclaration(binding.path.parent)) return false;
+    const source = binding.path.parent.source.value;
+    const compiledSources = meta.state.opts.importSources ?? [
+      '@compiled/react',
+      '@compiled/vanilla',
+      '@atlaskit/css',
+    ];
+    return !compiledSources.includes(source);
+  };
+
+  const containsExternalCall = (node: t.Node): boolean => {
+    let found = false;
+    t.traverseFast(node, (n) => {
+      if (!found && t.isCallExpression(n) && isExternalCallExpression(n)) {
+        found = true;
+      }
+    });
+    return found;
+  };
 
   const walk = (node: t.Node): void => {
     if (t.isObjectExpression(node)) {
       for (const prop of node.properties) {
         if (t.isObjectProperty(prop)) {
-          if (t.isCallExpression(prop.value)) {
-            const callee = prop.value.callee;
-            if (t.isIdentifier(callee)) {
-              // Check if the callee is imported from an external module
-              const binding = meta.parentPath.scope.getBinding(callee.name);
-              if (binding && t.isImportDeclaration(binding.path.parent)) {
-                const source = binding.path.parent.source.value;
-                // Skip compiled imports — buildCss knows how to handle those
-                const compiledSources = meta.state.opts.importSources ?? [
-                  '@compiled/react',
-                  '@compiled/vanilla',
-                  '@atlaskit/css',
-                ];
-                if (!compiledSources.includes(source)) {
-                  const placeholderName = `__compiled_gs_placeholder_${counter++}__`;
-                  replacements.push({
-                    parent: prop,
-                    original: prop.value,
-                    placeholderName,
-                  });
-                  prop.value = t.identifier(placeholderName);
-                }
-              }
-            }
+          // Direct CallExpression value (e.g. token('...'))
+          if (t.isCallExpression(prop.value) && isExternalCallExpression(prop.value)) {
+            const placeholderName = `__compiled_gs_placeholder_${counter++}__`;
+            replacements.push({
+              parent: prop,
+              original: prop.value,
+              placeholderName,
+            });
+            prop.value = t.identifier(placeholderName);
+          }
+          // TemplateLiteral containing an external call (e.g. `3px solid ${token(...)}`)
+          else if (t.isTemplateLiteral(prop.value) && containsExternalCall(prop.value)) {
+            const placeholderName = `__compiled_gs_placeholder_${counter++}__`;
+            replacements.push({
+              parent: prop,
+              original: prop.value,
+              placeholderName,
+            });
+            prop.value = t.identifier(placeholderName);
           } else {
             // Recurse into nested objects / arrays
             walk(prop.value);
@@ -472,7 +490,7 @@ const replaceExternalCallExpressions = (
 /**
  * Restores call expressions that were replaced by replaceExternalCallExpressions.
  */
-const restoreExternalCallExpressions = (replacements: CallExprReplacement[]): void => {
+const restoreExternalCallExpressions = (replacements: ExternalExprReplacement[]): void => {
   for (const { parent, original } of replacements) {
     parent.value = original;
   }
@@ -540,16 +558,22 @@ const resolveIdentifierToObjectExpression = (
 
 /**
  * Resolves an array of expressions (ObjectExpressions and identifier references)
- * into a single deep-merged ObjectExpression AST node.
+ * into a single merged ObjectExpression AST node.
  *
  * Used for array composition: [cssFragmentRef, { backgroundColor: 'yellow' }]
+ *
+ * First attempts static evaluation + deep-merge (handles fully resolved values).
+ * Falls back to AST-level property merging when values contain expressions that
+ * can't be statically evaluated (e.g. template literals with token() calls) —
+ * this preserves the expressions so buildCss can handle them naturally via CSS variables.
  */
 const resolveArrayToMergedObject = (
   arrayExpr: t.ArrayExpression,
   meta: Metadata,
   callNode: t.CallExpression
 ): t.ObjectExpression => {
-  const styleObjects: Record<string, unknown>[] = [];
+  // Resolve all elements to ObjectExpressions first
+  const objectExprs: t.ObjectExpression[] = [];
 
   for (const element of arrayExpr.elements) {
     if (!element || !t.isExpression(element)) {
@@ -582,19 +606,62 @@ const resolveArrayToMergedObject = (
       );
     }
 
-    const evaluated = evaluateObjectExpressionStatic(objExpr);
-    if (evaluated === null) {
-      throw buildCodeFrameError(
-        'globalStylesheet() array elements must be statically evaluable style objects',
-        callNode,
-        meta.parentPath
-      );
-    }
-    styleObjects.push(evaluated);
+    objectExprs.push(objExpr);
   }
 
-  const merged = deepMergeStyles(styleObjects);
-  return plainObjectToAst(merged);
+  // Try static evaluation + deep-merge first (handles fully resolved values)
+  const staticObjects: (Record<string, unknown> | null)[] = objectExprs.map(
+    evaluateObjectExpressionStatic
+  );
+
+  if (staticObjects.every((obj): obj is Record<string, unknown> => obj !== null)) {
+    // All elements are fully static — deep-merge and convert back to AST
+    const merged = deepMergeStyles(staticObjects);
+    return plainObjectToAst(merged);
+  }
+
+  // Fall back to AST-level property merging — later properties win for same key.
+  // This preserves non-literal expressions (e.g. template literals with token() calls)
+  // so buildCss can handle them via CSS variables + injectGlobalCssVariables.
+  return mergeObjectExpressionsAst(objectExprs);
+};
+
+/**
+ * Merges multiple ObjectExpression AST nodes at the AST level (later wins for same key).
+ * Unlike deep-merge, this preserves expression nodes as-is so buildCss can process them.
+ */
+const mergeObjectExpressionsAst = (objects: t.ObjectExpression[]): t.ObjectExpression => {
+  // Use a map to implement last-wins semantics for same property key
+  const propMap = new Map<string, t.ObjectProperty>();
+
+  for (const obj of objects) {
+    for (const prop of obj.properties) {
+      if (!t.isObjectProperty(prop)) continue;
+
+      let keyName: string;
+      if (t.isIdentifier(prop.key)) {
+        keyName = prop.key.name;
+      } else if (t.isStringLiteral(prop.key)) {
+        keyName = prop.key.value;
+      } else {
+        continue;
+      }
+
+      const existing = propMap.get(keyName);
+      if (existing && t.isObjectExpression(existing.value) && t.isObjectExpression(prop.value)) {
+        // Both are objects — recursively merge (for nested selectors/styles)
+        propMap.set(
+          keyName,
+          t.objectProperty(prop.key, mergeObjectExpressionsAst([existing.value, prop.value]))
+        );
+      } else {
+        // Primitive or different types — last wins
+        propMap.set(keyName, prop);
+      }
+    }
+  }
+
+  return t.objectExpression(Array.from(propMap.values()));
 };
 
 /**
@@ -627,6 +694,11 @@ const evaluateObjectExpressionStatic = (
       result[keyName] = prop.value.value;
     } else if (t.isNumericLiteral(prop.value)) {
       result[keyName] = prop.value.value;
+    } else if (t.isTemplateLiteral(prop.value) && prop.value.expressions.length === 0) {
+      // After other Babel plugins run (e.g. @atlaskit/tokens/babel-plugin), template
+      // literals like `3px solid ${token(...)}` may be fully resolved but still
+      // represented as TemplateLiteral nodes with zero expressions. Coalesce to string.
+      result[keyName] = prop.value.quasis.map((q) => q.value.cooked ?? q.value.raw).join('');
     } else {
       return null;
     }
