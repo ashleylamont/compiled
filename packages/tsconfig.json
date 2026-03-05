@@ -12,7 +12,8 @@
     { "path": "parcel-transformer/tsconfig.json" },
     { "path": "parcel-transformer-external/tsconfig.json" },
     { "path": "react/tsconfig.cjs.json" },
-    { "path": "runtime/tsconfig.json" },
+    { "path": "runtime/tsconfig.cjs.json" },
+    { "path": "vanilla/tsconfig.cjs.json" },
     { "path": "utils/tsconfig.json" },
     { "path": "vite-plugin/tsconfig.cjs.json" },
     { "path": "webpack-loader/tsconfig.json" }

@@ -3,6 +3,7 @@
   "references": [
     { "path": "react/tsconfig.json" },
     { "path": "runtime/tsconfig.json" },
+    { "path": "vanilla/tsconfig.json" },
     { "path": "vite-plugin/tsconfig.json" }
   ]
 }
