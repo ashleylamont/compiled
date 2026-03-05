@@ -4,5 +4,10 @@
     "outDir": "dist/cjs",
     "tsBuildInfoFile": "tsconfig.cjs.tsbuildinfo"
   },
-  "references": [{ "path": "../benchmark" }, { "path": "../jest" }, { "path": "../utils" }]
+  "references": [
+    { "path": "../benchmark" },
+    { "path": "../jest" },
+    { "path": "../utils" },
+    { "path": "../runtime" }
+  ]
 }

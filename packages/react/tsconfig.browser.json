@@ -14,5 +14,10 @@
     ],
     "tsBuildInfoFile": "tsconfig.browser.tsbuildinfo"
   },
-  "references": [{ "path": "../benchmark" }, { "path": "../jest" }, { "path": "../utils" }]
+  "references": [
+    { "path": "../benchmark" },
+    { "path": "../jest" },
+    { "path": "../utils" },
+    { "path": "../runtime" }
+  ]
 }

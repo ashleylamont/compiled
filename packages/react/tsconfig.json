@@ -6,5 +6,10 @@
     "moduleResolution": "node",
     "tsBuildInfoFile": "tsconfig.esm.tsbuildinfo"
   },
-  "references": [{ "path": "../benchmark" }, { "path": "../jest" }, { "path": "../utils" }]
+  "references": [
+    { "path": "../benchmark" },
+    { "path": "../jest" },
+    { "path": "../utils" },
+    { "path": "../runtime" }
+  ]
 }
