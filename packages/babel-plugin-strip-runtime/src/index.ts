@@ -154,9 +154,24 @@ export default declare<PluginPass>((api) => {
         if (path.node.source.value !== INJECT_GLOBAL_STYLES_SOURCE) {
           return;
         }
-        // Remove the entire import declaration for @compiled/vanilla/runtime
-        // (it only exports injectGlobalStyles which we strip)
-        path.remove();
+        // Remove specifiers that we strip (injectGlobalStyles), but preserve
+        // runtime-only specifiers like injectGlobalCssVariables (which sets
+        // CSS custom property values at runtime for dynamic expressions like token()).
+        const remaining = path.node.specifiers.filter(
+          (s) =>
+            !(
+              t.isImportSpecifier(s) &&
+              t.isIdentifier(s.imported) &&
+              s.imported.name === INJECT_GLOBAL_STYLES_NAME
+            )
+        );
+        if (remaining.length === 0) {
+          // All specifiers were stripped — remove the entire import
+          path.remove();
+        } else {
+          // Keep the import with only the runtime-needed specifiers
+          path.node.specifiers = remaining;
+        }
       },
 
       ImportSpecifier(path) {

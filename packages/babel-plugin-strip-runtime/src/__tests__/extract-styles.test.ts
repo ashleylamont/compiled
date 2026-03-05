@@ -243,3 +243,50 @@ describe('babel-plugin-strip-runtime handling injectGlobalStyles()', () => {
     );
   });
 });
+
+describe('babel-plugin-strip-runtime preserves injectGlobalCssVariables()', () => {
+  const runtime = 'classic';
+
+  // Code that has both injectGlobalStyles (static CSS) and injectGlobalCssVariables (dynamic runtime values)
+  const codeWithCssVariables = `
+    import { injectGlobalStyles, injectGlobalCssVariables } from '@compiled/vanilla/runtime';
+    import { token } from '@atlaskit/tokens';
+    export const styles = { tableCell: 'gs_abc1234' };
+    injectGlobalStyles('.gs_abc1234 .pm-table-cell{padding:var(--_1a2b3c)}', 'gs_abc1234');
+    injectGlobalCssVariables('gs_abc1234', { '--_1a2b3c': token('space.100', '8px') });
+  `;
+
+  it('strips injectGlobalStyles but preserves injectGlobalCssVariables call', () => {
+    const actual = transform(codeWithCssVariables, {
+      run: 'extract',
+      runtime,
+      extractStylesToDirectory: { source: 'src/', dest: 'dist/' },
+    });
+
+    expect(actual).not.toContain('injectGlobalStyles(');
+    expect(actual).toContain('injectGlobalCssVariables');
+  });
+
+  it('preserves the @compiled/vanilla/runtime import for injectGlobalCssVariables', () => {
+    const actual = transform(codeWithCssVariables, {
+      run: 'extract',
+      runtime,
+      extractStylesToDirectory: { source: 'src/', dest: 'dist/' },
+    });
+
+    expect(actual).toContain('@compiled/vanilla/runtime');
+    expect(actual).toContain('injectGlobalCssVariables');
+    // injectGlobalStyles specifier should be removed from the import
+    expect(actual).not.toMatch(/import.*injectGlobalStyles.*from/);
+  });
+
+  it('removes @compiled/vanilla/runtime import entirely when only injectGlobalStyles is present', () => {
+    const actual = transform(injectGlobalStylesCode, {
+      run: 'extract',
+      runtime,
+      extractStylesToDirectory: { source: 'src/', dest: 'dist/' },
+    });
+
+    expect(actual).not.toContain('@compiled/vanilla/runtime');
+  });
+});
