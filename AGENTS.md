@@ -301,3 +301,12 @@ yarn build:webpack:extract # Test CSS extraction
 - [Babel Handbook](https://github.com/jamiebuilds/babel-handbook) - Learn Babel plugin development
 - [Documentation website](https://compiledcssinjs.com) - User-facing docs and guides
 - Storybook examples: `stories/` directory - Live examples of all features
+
+## Active Technologies
+
+- TypeScript (strict mode), compiled via `ttsc` + `@compiled/babel-plugin` (extended), `@compiled/css` (reused), `@compiled/utils` (shared constants) (001-compiled-vanilla)
+- N/A (build-time tool, no persistence) (001-compiled-vanilla)
+
+## Recent Changes
+
+- 001-compiled-vanilla: Added TypeScript (strict mode), compiled via `ttsc` + `@compiled/babel-plugin` (extended), `@compiled/css` (reused), `@compiled/utils` (shared constants)
