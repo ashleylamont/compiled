@@ -119,6 +119,27 @@ export interface PluginOptions {
    * Defults to `true`.
    */
   flattenMultipleSelectors?: boolean;
+
+  /**
+   * List of Babel plugin module paths to apply when resolving cross-file imports.
+   *
+   * When the Compiled plugin follows an import to another file, it parses the raw source.
+   * Any call expressions from external packages (e.g. `token()` from `@atlaskit/tokens`)
+   * remain un-transformed in the parsed AST. This can cause issues when those expressions
+   * are inlined into the consuming file's output.
+   *
+   * By specifying Babel plugins here, the parsed foreign AST will be transformed with
+   * those plugins before the Compiled plugin extracts bindings from it. This ensures
+   * external call expressions are resolved to their static values.
+   *
+   * Each entry can be a string (module path) or a tuple of [module path, options].
+   *
+   * Example:
+   * ```
+   * resolveModuleTransforms: ['@atlaskit/tokens/babel-plugin']
+   * ```
+   */
+  resolveModuleTransforms?: (string | [string, Record<string, unknown>])[];
 }
 
 export interface State extends PluginPass {

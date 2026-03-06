@@ -13,3 +13,5 @@ storybook-static
 
 # Temporarily excluded for dev purposes, don't let me accidentally forget this and merge it in
 .rovodev
+scripts/yalc-publish.sh
+**/*.tgz

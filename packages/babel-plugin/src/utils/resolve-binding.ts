@@ -1,6 +1,7 @@
 import fs from 'fs';
 import { dirname, join } from 'path';
 
+import { transformFromAstSync } from '@babel/core';
 import { parse } from '@babel/parser';
 import type { NodePath, Binding } from '@babel/traverse';
 import traverse from '@babel/traverse';
@@ -310,7 +311,7 @@ export const resolveBinding = (
       value: () => fs.readFileSync(modulePath, 'utf-8'),
     });
 
-    const ast = meta.state.cache.load({
+    const rawAst = meta.state.cache.load({
       namespace: 'parse-module',
       cacheKey: modulePath,
       value: () =>
@@ -320,6 +321,38 @@ export const resolveBinding = (
           plugins: meta.state.opts.parserBabelPlugins ?? DEFAULT_PARSER_BABEL_PLUGINS,
         }),
     });
+
+    // Apply any configured module transforms (e.g. @atlaskit/tokens/babel-plugin)
+    // to the parsed AST before extracting bindings. This ensures that external
+    // call expressions (like token()) are resolved to their static values before
+    // being inlined into the consuming file.
+    const resolveModuleTransforms = meta.state.opts.resolveModuleTransforms;
+    const ast = resolveModuleTransforms?.length
+      ? meta.state.cache.load({
+          namespace: 'transform-module',
+          cacheKey: `${modulePath}:${JSON.stringify(resolveModuleTransforms)}`,
+          value: () => {
+            const plugins = resolveModuleTransforms.map((pluginEntry) => {
+              if (typeof pluginEntry === 'string') {
+                return require(pluginEntry);
+              }
+              const [pluginPath, pluginOpts] = pluginEntry;
+              return [require(pluginPath), pluginOpts];
+            });
+
+            const result = transformFromAstSync(t.cloneNode(rawAst, /* deep */ true), moduleCode, {
+              ast: true,
+              code: false,
+              babelrc: false,
+              configFile: false,
+              filename: modulePath,
+              plugins,
+            });
+
+            return result?.ast ?? rawAst;
+          },
+        })
+      : rawAst;
 
     let foundNode: t.Node | undefined = undefined;
     let foundParentPath: NodePath | undefined = undefined;

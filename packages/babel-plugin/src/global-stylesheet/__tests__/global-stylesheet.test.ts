@@ -469,6 +469,101 @@ describe('globalStylesheet', () => {
       expect(result).not.toContain('var(--_');
     });
 
+    it('resolves cross-file cssFragment with external calls when resolveModuleTransforms is configured', () => {
+      // BUG: When a cssFragment in file A uses token() from @atlaskit/tokens,
+      // and file B imports it, the token() call gets inlined as a raw CallExpression.
+      // The token babel plugin never runs on this inlined AST (because resolveBinding
+      // parses the raw source without running transforms), so the output contains
+      // an unresolved token() call that throws ReferenceError at runtime.
+      //
+      // FIX: The resolveModuleTransforms option tells the plugin to run specified
+      // Babel transforms on foreign files after parsing, so token() calls are
+      // resolved to string literals before being inlined.
+      const result = transform(
+        `
+        import { globalStylesheet } from '@compiled/vanilla';
+        import { subtleHighlight } from '../../__fixtures__/mixins/fragment-with-calls';
+
+        export const styles = globalStylesheet({
+          editor: {
+            '.ProseMirror': [
+              subtleHighlight,
+              { padding: '8px' },
+            ],
+          },
+        });
+        `,
+        {
+          filename: join(__dirname, 'cross-file-token-test.ts'),
+          resolveModuleTransforms: [join(__dirname, '../../__fixtures__/mock-token-plugin.js')],
+        }
+      );
+      // token() calls should be resolved to var(--ds-...) strings
+      expect(result).toContain('var(--ds-color-background-accent-blue-subtlest, #E9F2FF)');
+      expect(result).toContain('background-color');
+      expect(result).toContain('transition');
+      expect(result).toContain('padding:8px');
+      // Should NOT contain raw token() calls or CSS variables for them
+      expect(result).not.toContain('token(');
+      expect(result).not.toContain('injectGlobalCssVariables');
+    });
+
+    it('resolves cross-file cssFragment with template literal + external calls via resolveModuleTransforms', () => {
+      // Tests the case where a cssFragment contains a template literal with
+      // an embedded token() call, e.g. `3px solid ${token(...)}`
+      const result = transform(
+        `
+        import { globalStylesheet } from '@compiled/vanilla';
+        import { accentBorder } from '../../__fixtures__/mixins/fragment-with-calls';
+
+        export const styles = globalStylesheet({
+          editor: {
+            '.ProseMirror': [
+              accentBorder,
+              { padding: '8px' },
+            ],
+          },
+        });
+        `,
+        {
+          filename: join(__dirname, 'cross-file-token-tpl-test.ts'),
+          resolveModuleTransforms: [join(__dirname, '../../__fixtures__/mock-token-plugin.js')],
+        }
+      );
+      // token() calls should be resolved
+      expect(result).toContain('var(--ds-color-border-brand, blue)');
+      expect(result).toContain('var(--ds-radius-small, 4px)');
+      expect(result).toContain('border-left');
+      expect(result).toContain('border-radius');
+      expect(result).toContain('padding:8px');
+      // Should NOT contain raw token() calls
+      expect(result).not.toContain('token(');
+    });
+
+    it('cross-file cssFragment with unresolved external calls throws without resolveModuleTransforms', () => {
+      // Without the resolveModuleTransforms option, cross-file fragments containing
+      // external call expressions (like token()) cannot be statically evaluated.
+      // This results in a build error — which is the expected behavior that
+      // resolveModuleTransforms was designed to solve.
+      expect(() =>
+        transform(
+          `
+          import { globalStylesheet } from '@compiled/vanilla';
+          import { subtleHighlight } from '../../__fixtures__/mixins/fragment-with-calls';
+
+          export const styles = globalStylesheet({
+            editor: {
+              '.ProseMirror': subtleHighlight,
+            },
+          });
+          `,
+          {
+            filename: join(__dirname, 'cross-file-no-transform-test.ts'),
+          }
+        )
+      ).toThrow('globalStylesheet() values must be statically evaluable');
+    });
+
     it('handles the full spike scenario correctly end-to-end', () => {
       // Full reproduction of the AFP spike scenario:
       // - cssFragment composition via array
