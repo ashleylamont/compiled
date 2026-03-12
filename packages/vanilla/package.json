@@ -1,6 +1,6 @@
 {
   "name": "@compiled/vanilla",
-  "version": "0.1.0",
+  "version": "0.1.1-spike.0",
   "description": "Compile-time CSS-in-JS for non-React environments.",
   "homepage": "https://compiledcssinjs.com",
   "bugs": "https://github.com/atlassian-labs/compiled/issues/new?assignees=&labels=bug&template=bug_report.md",

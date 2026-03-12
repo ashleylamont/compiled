@@ -11,6 +11,29 @@ describe('module traversal', () => {
   const transform = (code: string, opts: TransformOptions = {}) =>
     transformCode(code, { filename: join(__dirname, 'module-traversal.js'), ...opts });
 
+  it('should resolve module transforms before unwrapping an imported cssFragment', () => {
+    const actual = transform(
+      `
+      import { globalStylesheet } from '@compiled/vanilla';
+      import { subtleHighlight } from '../__fixtures__/mixins/vanilla-fragment';
+
+      const styles = globalStylesheet({
+        tableCell: [subtleHighlight],
+      });
+    `,
+      {
+        importSources: ['@compiled/vanilla'],
+        resolveModuleTransforms: [
+          join(__dirname, '..', '__fixtures__', 'module-transform-token-plugin.js'),
+        ],
+      }
+    );
+
+    expect(actual).toInclude('var(--mock-color-background-accent-blue-subtlest, #E9F2FF)');
+    expect(actual).not.toInclude('UNTRANSFORMED_TOKEN(');
+    expect(actual).not.toInclude('token(');
+  });
+
   it('should replace an identifier referencing a default import specifier object', () => {
     const actual = transform(`
       import '@compiled/react';

@@ -1,7 +1,7 @@
 import fs from 'fs';
 import { dirname, join } from 'path';
 
-import { transformFromAstSync } from '@babel/core';
+import { transformFileSync } from '@babel/core';
 import { parse } from '@babel/parser';
 import type { NodePath, Binding } from '@babel/traverse';
 import traverse from '@babel/traverse';
@@ -14,6 +14,50 @@ import type { Metadata } from '../types';
 
 import { getDefaultExport, getNamedExport, setImportedCompiledImports } from './traversers';
 import type { PartialBindingWithMeta, EvaluateExpression } from './types';
+
+const COMPILED_RESOLVE_DEBUG_PATTERNS = [
+  'vanillaSpikeFragments',
+  'vanillaSpikeStyles',
+  'EditorContentContainer/styles',
+];
+
+const shouldDebugCompiledResolve = (...values: (string | undefined)[]) =>
+  values.some((value) =>
+    value ? COMPILED_RESOLVE_DEBUG_PATTERNS.some((pattern) => value.includes(pattern)) : false
+  );
+
+const nodeContainsIdentifierNamed = (node: t.Node | undefined, name: string): boolean => {
+  let found = false;
+
+  const visit = (value: unknown) => {
+    if (found || !value) {
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+
+    if (typeof value !== 'object' || value === null || !('type' in value)) {
+      return;
+    }
+
+    const typedNode = value as t.Node;
+    if (t.isIdentifier(typedNode, { name })) {
+      found = true;
+      return;
+    }
+
+    const visitorKeys = t.VISITOR_KEYS[typedNode.type] ?? [];
+    visitorKeys.forEach((key) => {
+      visit((typedNode as unknown as Record<string, unknown>)[key]);
+    });
+  };
+
+  visit(node);
+  return found;
+};
 
 /**
  * Will recursively checks if identifier name is coming from destructuring. If yes,
@@ -299,6 +343,18 @@ export const resolveBinding = (
 
     const extensions = meta.state.opts.extensions ?? DEFAULT_CODE_EXTENSIONS;
     const modulePath = resolveRequest(moduleImportSource, extensions, meta);
+    const shouldDebugResolve = shouldDebugCompiledResolve(
+      meta.state.filename,
+      moduleImportSource,
+      modulePath
+    );
+
+    if (shouldDebugResolve) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[compiled-resolve-debug] resolving import referenceName=${referenceName} from=${meta.state.filename} importSource=${moduleImportSource} modulePath=${modulePath}`
+      );
+    }
 
     if (!extensions.some((extension) => modulePath.endsWith(extension))) {
       // Don't attempt to parse any files that are not configured as code
@@ -327,10 +383,11 @@ export const resolveBinding = (
     // call expressions (like token()) are resolved to their static values before
     // being inlined into the consuming file.
     const resolveModuleTransforms = meta.state.opts.resolveModuleTransforms;
+    const resolveModuleTransformsCacheKey = JSON.stringify(resolveModuleTransforms ?? []);
     const ast = resolveModuleTransforms?.length
       ? meta.state.cache.load({
           namespace: 'transform-module',
-          cacheKey: `${modulePath}:${JSON.stringify(resolveModuleTransforms)}`,
+          cacheKey: `${modulePath}:${resolveModuleTransformsCacheKey}`,
           value: () => {
             const plugins = resolveModuleTransforms.map((pluginEntry) => {
               if (typeof pluginEntry === 'string') {
@@ -340,19 +397,39 @@ export const resolveBinding = (
               return [require(pluginPath), pluginOpts];
             });
 
-            const result = transformFromAstSync(t.cloneNode(rawAst, /* deep */ true), moduleCode, {
-              ast: true,
-              code: false,
+            const result = transformFileSync(modulePath, {
+              ast: false,
+              code: true,
               babelrc: false,
               configFile: false,
               filename: modulePath,
+              parserOpts: {
+                plugins: meta.state.opts.parserBabelPlugins ?? DEFAULT_PARSER_BABEL_PLUGINS,
+              },
               plugins,
             });
 
-            return result?.ast ?? rawAst;
+            if (!result?.code) {
+              return rawAst;
+            }
+
+            return parse(result.code, {
+              sourceType: 'module',
+              sourceFilename: modulePath,
+              plugins: meta.state.opts.parserBabelPlugins ?? DEFAULT_PARSER_BABEL_PLUGINS,
+            });
           },
         })
       : rawAst;
+
+    if (shouldDebugResolve) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[compiled-resolve-debug] transforms applied modulePath=${modulePath} count=${
+          resolveModuleTransforms?.length ?? 0
+        } value=${JSON.stringify(resolveModuleTransforms)}`
+      );
+    }
 
     let foundNode: t.Node | undefined = undefined;
     let foundParentPath: NodePath | undefined = undefined;
@@ -360,7 +437,7 @@ export const resolveBinding = (
     if (binding.path.isImportDefaultSpecifier()) {
       ({ foundNode, foundParentPath } = meta.state.cache.load({
         namespace: 'find-default-export-module-node',
-        cacheKey: modulePath,
+        cacheKey: `${modulePath}:transforms=${resolveModuleTransformsCacheKey}`,
         value: () => {
           const result = getDefaultExport(ast);
 
@@ -376,7 +453,7 @@ export const resolveBinding = (
 
       ({ foundNode, foundParentPath } = meta.state.cache.load({
         namespace: 'find-named-export-module-node',
-        cacheKey: `modulePath=${modulePath}&exportName=${exportName}`,
+        cacheKey: `modulePath=${modulePath}&exportName=${exportName}&transforms=${resolveModuleTransformsCacheKey}`,
         value: () => {
           const result = getNamedExport(ast, exportName);
 
@@ -428,7 +505,59 @@ export const resolveBinding = (
     }
 
     if (!foundNode || !foundParentPath) {
+      if (shouldDebugResolve) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `[compiled-resolve-debug] no resolved node found referenceName=${referenceName} modulePath=${modulePath}`
+        );
+      }
       return undefined;
+    }
+
+    if (shouldDebugResolve) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[compiled-resolve-debug] found node type=${
+          foundNode.type
+        } tokenBeforeUnwrap=${nodeContainsIdentifierNamed(foundNode, 'token')}`
+      );
+    }
+
+    // If the resolved node is a cssFragment() call expression, unwrap it to
+    // just the object argument.  When resolveBinding follows an import to a
+    // foreign module, the cssFragment() wrapper has not been compiled away yet
+    // (it is only transformed when @compiled/babel-plugin visits the file as a
+    // primary target).  Unwrapping here avoids the consuming transform from
+    // trying to evaluate the cssFragment call (and its transitive dependencies
+    // such as token()) which would fail because those bindings only exist in
+    // the foreign module's scope.
+    let unwrappedCssFragment = false;
+    if (
+      t.isCallExpression(foundNode) &&
+      t.isIdentifier(foundNode.callee) &&
+      foundNode.callee.name === 'cssFragment' &&
+      foundNode.arguments.length === 1 &&
+      t.isObjectExpression(foundNode.arguments[0])
+    ) {
+      foundNode = foundNode.arguments[0];
+      unwrappedCssFragment = true;
+    }
+
+    if (shouldDebugResolve) {
+      const tokenAfterUnwrap = nodeContainsIdentifierNamed(foundNode, 'token');
+      // eslint-disable-next-line no-console
+      console.log(
+        `[compiled-resolve-debug] returning node type=${foundNode.type} unwrappedCssFragment=${unwrappedCssFragment} tokenAfterUnwrap=${tokenAfterUnwrap}`
+      );
+      if (tokenAfterUnwrap) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `[compiled-resolve-debug] returning node snapshot=${JSON.stringify(foundNode).slice(
+            0,
+            600
+          )}`
+        );
+      }
     }
 
     return {
