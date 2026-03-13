@@ -12,8 +12,8 @@ import resolve from 'resolve';
 import { DEFAULT_CODE_EXTENSIONS } from '../constants';
 import type { Metadata } from '../types';
 
-import { isAtlaskitTokensTransform, lowerAtlaskitTokenCallPath } from './atlaskit-tokens';
 import { getPathOfNode } from './ast';
+import { isAtlaskitTokensTransform, lowerAtlaskitTokenCallPath } from './atlaskit-tokens';
 import { getDefaultExport, getNamedExport, setImportedCompiledImports } from './traversers';
 import type { PartialBindingWithMeta, EvaluateExpression } from './types';
 
