@@ -49,6 +49,11 @@ export interface PluginPass extends OriginalPluginPass {
   styleRules: string[];
 
   /**
+   * Store all found global style rules during the file pass.
+   */
+  globalStyleRules: string[];
+
+  /**
    * Data of the current file being transformed.
    */
   file: BabelFile;

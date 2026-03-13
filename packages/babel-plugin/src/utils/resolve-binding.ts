@@ -12,6 +12,8 @@ import resolve from 'resolve';
 import { DEFAULT_CODE_EXTENSIONS } from '../constants';
 import type { Metadata } from '../types';
 
+import { isAtlaskitTokensTransform, lowerAtlaskitTokenCallPath } from './atlaskit-tokens';
+import { getPathOfNode } from './ast';
 import { getDefaultExport, getNamedExport, setImportedCompiledImports } from './traversers';
 import type { PartialBindingWithMeta, EvaluateExpression } from './types';
 
@@ -384,12 +386,16 @@ export const resolveBinding = (
     // being inlined into the consuming file.
     const resolveModuleTransforms = meta.state.opts.resolveModuleTransforms;
     const resolveModuleTransformsCacheKey = JSON.stringify(resolveModuleTransforms ?? []);
-    const ast = resolveModuleTransforms?.length
+    const externalResolveModuleTransforms = resolveModuleTransforms?.filter((pluginEntry) => {
+      const pluginPath = typeof pluginEntry === 'string' ? pluginEntry : pluginEntry[0];
+      return !isAtlaskitTokensTransform(pluginPath);
+    });
+    const ast = externalResolveModuleTransforms?.length
       ? meta.state.cache.load({
           namespace: 'transform-module',
           cacheKey: `${modulePath}:${resolveModuleTransformsCacheKey}`,
           value: () => {
-            const plugins = resolveModuleTransforms.map((pluginEntry) => {
+            const plugins = externalResolveModuleTransforms.map((pluginEntry) => {
               if (typeof pluginEntry === 'string') {
                 return require(pluginEntry);
               }
@@ -514,6 +520,38 @@ export const resolveBinding = (
       return undefined;
     }
 
+    const importedMeta = {
+      ...meta,
+      parentPath: foundParentPath,
+      state: {
+        ...meta.state,
+        file: ast,
+        filename: modulePath,
+      },
+    };
+
+    if (t.isExpression(foundNode)) {
+      const foundNodePath = getPathOfNode(foundNode, foundParentPath);
+      foundNodePath.traverse({
+        CallExpression(callPath) {
+          const lowered = lowerAtlaskitTokenCallPath(
+            callPath,
+            {
+              ...importedMeta,
+              parentPath: callPath.parentPath,
+            },
+            evaluateExpression
+          );
+
+          if (lowered) {
+            callPath.replaceWith(lowered);
+          }
+        },
+      });
+
+      foundNode = foundNodePath.node;
+    }
+
     if (shouldDebugResolve) {
       // eslint-disable-next-line no-console
       console.log(
@@ -565,15 +603,7 @@ export const resolveBinding = (
       node: foundNode,
       path: foundParentPath,
       source: 'import',
-      meta: {
-        ...meta,
-        parentPath: foundParentPath,
-        state: {
-          ...meta.state,
-          file: ast,
-          filename: modulePath,
-        },
-      },
+      meta: importedMeta,
     };
   }
 

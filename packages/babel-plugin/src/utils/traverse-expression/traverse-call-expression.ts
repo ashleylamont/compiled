@@ -2,6 +2,7 @@ import * as t from '@babel/types';
 
 import type { Metadata } from '../../types';
 import { getPathOfNode, wrapNodeInIIFE } from '../ast';
+import { lowerAtlaskitTokenCall } from '../atlaskit-tokens';
 import { createResultPair } from '../create-result-pair';
 import { resolveBinding } from '../resolve-binding';
 import type { EvaluateExpression } from '../types';
@@ -40,6 +41,15 @@ export const traverseCallExpression = (
          so that only isolated params are evaluated.
       8. In `resolveBindingNode`, if `ownPath` is not set (module traversal case or any other case), it will pick things from `parentPath`.
     */
+  const loweredAtlaskitTokenCall = lowerAtlaskitTokenCall(
+    expression,
+    updatedMeta,
+    evaluateExpression
+  );
+  if (loweredAtlaskitTokenCall) {
+    return createResultPair(loweredAtlaskitTokenCall, updatedMeta);
+  }
+
   if (t.isExpression(callee)) {
     let functionNode;
 

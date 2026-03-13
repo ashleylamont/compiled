@@ -37,9 +37,12 @@ export default declare<PluginPass>((api) => {
           }
 
           if (this.opts.compiledRequireExclude) {
-            // Rather than inserting styleRules to the code, inserting them to metadata in the case like SSR
+            // Rather than inserting styleRules to the code, insert all extracted rules into metadata in SSR / Parcel flows.
             if (!file.metadata?.styleRules) file.metadata.styleRules = [];
             this.styleRules.forEach((rule) => {
+              file.metadata.styleRules.push(rule);
+            });
+            this.globalStyleRules.forEach((rule: string) => {
               file.metadata.styleRules.push(rule);
             });
             return;

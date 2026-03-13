@@ -1,4 +1,6 @@
-import { join } from 'path';
+import { dirname, join } from 'path';
+
+import resolve from 'resolve';
 
 import { transform as transformCode } from '../../test-utils';
 
@@ -6,6 +8,26 @@ const transform = (code: string, opts: Record<string, unknown> = {}) =>
   transformCode(code, opts as Parameters<typeof transformCode>[1]);
 
 describe('globalStylesheet', () => {
+  const atlaskitTokensFixturesRoot = join(__dirname, '../../__fixtures__/atlaskit-tokens');
+  const atlaskitTokensResolver = {
+    resolveSync(context: string, request: string) {
+      if (request === '@atlaskit/tokens/token-names') {
+        return join(atlaskitTokensFixturesRoot, 'token-names.tsx');
+      }
+
+      if (request === '@atlaskit/tokens/token-default-values') {
+        return join(atlaskitTokensFixturesRoot, 'token-default-values.tsx');
+      }
+
+      return resolve.sync(
+        request.charAt(0) === '.' ? join(context ? dirname(context) : '.', request) : request,
+        {
+          basedir: context ? dirname(context) : process.cwd(),
+          extensions: ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs'],
+        }
+      );
+    },
+  };
   it('basic: single key with nested selector', () => {
     const result = transform(
       `
@@ -23,9 +45,9 @@ describe('globalStylesheet', () => {
       import { ax, ix, CC, CS } from "@compiled/react/runtime";
       import { injectGlobalStyles } from "@compiled/vanilla/runtime";
       export const styles = {
-        tableCell: "gs_54nh3i",
+        tableCell: "gs_12whad4",
       };
-      injectGlobalStyles(".gs_54nh3i .pm-table-cell{padding:8px}", "gs_54nh3i");
+      injectGlobalStyles(".gs_12whad4 .pm-table-cell{padding:8px}", "gs_12whad4");
       "
     `);
   });
@@ -50,13 +72,13 @@ describe('globalStylesheet', () => {
       import { ax, ix, CC, CS } from "@compiled/react/runtime";
       import { injectGlobalStyles } from "@compiled/vanilla/runtime";
       export const styles = {
-        tableCell: "gs_54nh3i",
-        codeBlock: "gs_pwtzwl",
+        tableCell: "gs_12whad4",
+        codeBlock: "gs_zogoh5",
       };
-      injectGlobalStyles(".gs_54nh3i .pm-table-cell{padding:8px}", "gs_54nh3i");
+      injectGlobalStyles(".gs_12whad4 .pm-table-cell{padding:8px}", "gs_12whad4");
       injectGlobalStyles(
-        ".gs_pwtzwl .code-block{font-family:monospace}",
-        "gs_pwtzwl"
+        ".gs_zogoh5 .code-block{font-family:monospace}",
+        "gs_zogoh5"
       );
       "
     `);
@@ -79,11 +101,11 @@ describe('globalStylesheet', () => {
       import { ax, ix, CC, CS } from "@compiled/react/runtime";
       import { injectGlobalStyles } from "@compiled/vanilla/runtime";
       export const styles = {
-        editor: "gs_17dirda",
+        editor: "gs_1wqs5c4",
       };
       injectGlobalStyles(
-        ".gs_17dirda .pm-table-cell .code-block{padding:4px;color:red}",
-        "gs_17dirda"
+        ".gs_1wqs5c4 .pm-table-cell .code-block{padding:4px;color:red}",
+        "gs_1wqs5c4"
       );
       "
     `);
@@ -495,11 +517,17 @@ describe('globalStylesheet', () => {
         `,
         {
           filename: join(__dirname, 'cross-file-token-test.ts'),
-          resolveModuleTransforms: [join(__dirname, '../../__fixtures__/mock-token-plugin.js')],
+          resolveModuleTransforms: [
+            [
+              '@atlaskit/tokens/babel-plugin',
+              { shouldUseAutoFallback: true, shouldForceAutoFallback: true },
+            ],
+          ],
+          resolver: atlaskitTokensResolver,
         }
       );
       // token() calls should be resolved to var(--ds-...) strings
-      expect(result).toContain('var(--ds-color-background-accent-blue-subtlest, #E9F2FF)');
+      expect(result).toContain('var(--ds-background-accent-blue-subtlest, #E9F2FF)');
       expect(result).toContain('background-color');
       expect(result).toContain('transition');
       expect(result).toContain('padding:8px');
@@ -527,11 +555,17 @@ describe('globalStylesheet', () => {
         `,
         {
           filename: join(__dirname, 'cross-file-token-tpl-test.ts'),
-          resolveModuleTransforms: [join(__dirname, '../../__fixtures__/mock-token-plugin.js')],
+          resolveModuleTransforms: [
+            [
+              '@atlaskit/tokens/babel-plugin',
+              { shouldUseAutoFallback: true, shouldForceAutoFallback: true },
+            ],
+          ],
+          resolver: atlaskitTokensResolver,
         }
       );
       // token() calls should be resolved
-      expect(result).toContain('var(--ds-color-border-brand, blue)');
+      expect(result).toContain('var(--ds-border-brand, #1868DB)');
       expect(result).toContain('var(--ds-radius-small, 4px)');
       expect(result).toContain('border-left');
       expect(result).toContain('border-radius');

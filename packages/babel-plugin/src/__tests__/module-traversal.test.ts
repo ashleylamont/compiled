@@ -1,4 +1,6 @@
-import { join } from 'path';
+import { dirname, join } from 'path';
+
+import resolve from 'resolve';
 
 import type { TransformOptions } from '../test-utils';
 import { transform as transformCode } from '../test-utils';
@@ -8,6 +10,28 @@ import Mock = jest.Mock;
 jest.mock('../utils/cache');
 
 describe('module traversal', () => {
+  const atlaskitTokensFixturesRoot = join(__dirname, '..', '__fixtures__', 'atlaskit-tokens');
+
+  const atlaskitTokensResolver: NonNullable<TransformOptions['resolver']> = {
+    resolveSync(context, request) {
+      if (request === '@atlaskit/tokens/token-names') {
+        return join(atlaskitTokensFixturesRoot, 'token-names.tsx');
+      }
+
+      if (request === '@atlaskit/tokens/token-default-values') {
+        return join(atlaskitTokensFixturesRoot, 'token-default-values.tsx');
+      }
+
+      return resolve.sync(
+        request.charAt(0) === '.' ? join(context ? dirname(context) : '.', request) : request,
+        {
+          basedir: context ? dirname(context) : process.cwd(),
+          extensions: ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs'],
+        }
+      );
+    },
+  };
+
   const transform = (code: string, opts: TransformOptions = {}) =>
     transformCode(code, { filename: join(__dirname, 'module-traversal.js'), ...opts });
 
@@ -15,7 +39,7 @@ describe('module traversal', () => {
     const actual = transform(
       `
       import { globalStylesheet } from '@compiled/vanilla';
-      import { subtleHighlight } from '../__fixtures__/mixins/vanilla-fragment';
+      import { subtleHighlight } from '../__fixtures__/mixins/fragment-with-calls';
 
       const styles = globalStylesheet({
         tableCell: [subtleHighlight],
@@ -24,13 +48,16 @@ describe('module traversal', () => {
       {
         importSources: ['@compiled/vanilla'],
         resolveModuleTransforms: [
-          join(__dirname, '..', '__fixtures__', 'module-transform-token-plugin.js'),
+          [
+            '@atlaskit/tokens/babel-plugin',
+            { shouldUseAutoFallback: true, shouldForceAutoFallback: true },
+          ],
         ],
+        resolver: atlaskitTokensResolver,
       }
     );
 
-    expect(actual).toInclude('var(--mock-color-background-accent-blue-subtlest, #E9F2FF)');
-    expect(actual).not.toInclude('UNTRANSFORMED_TOKEN(');
+    expect(actual).toInclude('var(--ds-background-accent-blue-subtlest, #E9F2FF)');
     expect(actual).not.toInclude('token(');
   });
 

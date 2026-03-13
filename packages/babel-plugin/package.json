@@ -43,5 +43,13 @@
     "prettier": "^2.8.8",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.1.2"
+  },
+  "peerDependencies": {
+    "@atlaskit/tokens": "*"
+  },
+  "peerDependenciesMeta": {
+    "@atlaskit/tokens": {
+      "optional": true
+    }
   }
 }

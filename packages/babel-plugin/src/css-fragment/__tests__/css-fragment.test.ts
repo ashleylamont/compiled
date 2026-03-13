@@ -63,12 +63,9 @@ describe('cssFragment', () => {
         },
       };
       export const styles = {
-        cell: "gs_18oglda",
+        cell: "gs_hyijdw",
       };
-      injectGlobalStyles(
-        ".gs_18oglda .child{color:red;font-size:14px}",
-        "gs_18oglda"
-      );
+      injectGlobalStyles(".gs_hyijdw .child{color:red;font-size:14px}", "gs_hyijdw");
       "
     `);
   });
